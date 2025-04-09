@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <string>
 
-int main() {
+int legacy_main() {  // Renamed to avoid duplicate main function
     // Initialize window
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Toilet Brawl - Raylib Implementation");
     SetTargetFPS(60);
@@ -84,7 +84,7 @@ int main() {
         // Check for newly started death animations
         if (!playerDiedLastFrame && player.isDying) {
             // Create blast particles for player death
-            auto deathParticles = createBlastParticles(player.deathPosition, 40, player.color);
+            std::vector<Particle> deathParticles = createBlastParticles(player.deathPosition, 40, player.color);
             particles.insert(particles.end(), deathParticles.begin(), deathParticles.end());
             
             // Play smash-like "blast off" effect
@@ -93,7 +93,7 @@ int main() {
         
         if (!enemyDiedLastFrame && enemy.isDying) {
             // Create blast particles for enemy death
-            auto deathParticles = createBlastParticles(enemy.deathPosition, 40, enemy.color);
+            std::vector<Particle> deathParticles = createBlastParticles(enemy.deathPosition, 40, enemy.color);
             particles.insert(particles.end(), deathParticles.begin(), deathParticles.end());
         }
         
@@ -104,24 +104,24 @@ int main() {
         // Check for hits
         if (player.checkHit(enemy)) {
             // Create hit particles
-            auto newParticles = createSplashParticles(enemy.position, 20);
+            std::vector<Particle> newParticles = createSplashParticles(enemy.position, 20);
             particles.insert(particles.end(), newParticles.begin(), newParticles.end());
             
             // If damage is very high, create more particles
-            if (enemy.damage > 100) {
-                auto extraParticles = createSplashParticles(enemy.position, enemy.damage / 20);
+            if (enemy.damagePercent > 100) {
+                std::vector<Particle> extraParticles = createSplashParticles(enemy.position, enemy.damagePercent / 20);
                 particles.insert(particles.end(), extraParticles.begin(), extraParticles.end());
             }
         }
         
         if (enemy.checkHit(player)) {
             // Create hit particles
-            auto newParticles = createSplashParticles(player.position, 20);
+            std::vector<Particle> newParticles = createSplashParticles(player.position, 20);
             particles.insert(particles.end(), newParticles.begin(), newParticles.end());
             
             // If damage is very high, create more particles
-            if (player.damage > 100) {
-                auto extraParticles = createSplashParticles(player.position, player.damage / 20);
+            if (player.damagePercent > 100) {
+                std::vector<Particle> extraParticles = createSplashParticles(player.position, player.damagePercent / 20);
                 particles.insert(particles.end(), extraParticles.begin(), extraParticles.end());
             }
         }
@@ -186,10 +186,10 @@ int main() {
         
         // Draw damage meters
         DrawText("Player Damage:", 20, SCREEN_HEIGHT - 40, 20, DARKBLUE);
-        DrawRectangle(170, SCREEN_HEIGHT - 35, player.damage * 2, 20, RED);
+        DrawRectangle(170, SCREEN_HEIGHT - 35, player.damagePercent * 2, 20, RED);
         
         DrawText("Enemy Damage:", SCREEN_WIDTH - 250, SCREEN_HEIGHT - 40, 20, DARKBLUE);
-        DrawRectangle(SCREEN_WIDTH - 100, SCREEN_HEIGHT - 35, enemy.damage * 2, 20, RED);
+        DrawRectangle(SCREEN_WIDTH - 100, SCREEN_HEIGHT - 35, enemy.damagePercent * 2, 20, RED);
         
         EndDrawing();
     }

@@ -1,658 +1,1415 @@
 #include "Character.h"
-#include "Constants.h"
+#include "ParticleSystem.h"
 #include <cmath>
 #include <algorithm>
 
-Character::Character(float x, float y, float w, float h, float spd, Color col, std::string n) :
-    position({x, y}), width(w), height(h), speed(spd), isJumping(false),
-    isFacingRight(true), isAttacking(false), damage(0), color(col), name(n),
-    velocity({0, 0}), currentFrame(0), framesCounter(0), framesSpeed(8),
-    isSpecialAttack(false), currentAttack(NONE), attackDuration(0), attackFrame(0),
-    canAttack(true), specialCooldown(60), currentCooldown(0),
-    specialSideCooldown(45), currentSideCooldown(0),
-    specialUpCooldown(90), currentUpCooldown(0),
-    specialDownCooldown(70), currentDownCooldown(0),
-    isRecovering(false), isDying(false), deathRotation(0), deathScale(1.0f),
-    deathDuration(60), deathFrame(0), deathVelocity({0, 0}), deathPosition({0, 0}) {}
+// HitEffect implementation
+HitEffect::HitEffect(Vector2 pos, Color col) {
+    position = pos;
+    color = col;
+    duration = 15;
+    currentFrame = 0;
+    size = 30.0f;
+}
+
+bool HitEffect::update() {
+    currentFrame++;
+    size -= 1.5f;
+    return currentFrame < duration;
+}
+
+void HitEffect::draw() {
+    float alpha = 1.0f - (float)currentFrame / duration;
+    Color effectColor = {color.r, color.g, color.b, (unsigned char)(255 * alpha)};
+    DrawCircleV(position, size, effectColor);
+
+    // Draw impact lines
+    for (int i = 0; i < 8; i++) {
+        float angle = i * 45.0f * DEG2RAD;
+        float lineLength = size * 1.5f * (1.0f - (float)currentFrame / duration);
+        Vector2 end = {
+            position.x + cos(angle) * lineLength,
+            position.y + sin(angle) * lineLength
+        };
+        DrawLineEx(position, end, 3.0f, effectColor);
+    }
+}
+
+// Character implementation
+Character::Character(float x, float y, float w, float h, float spd, Color col, std::string n) {
+    // Basic properties
+    position = {x, y};
+    velocity = {0, 0};
+    width = w;
+    height = h;
+    speed = spd;
+    color = col;
+    name = n;
+
+    // Smash-style properties
+    damagePercent = 0.0f;
+    stocks = DEFAULT_STOCKS;
+    isInvincible = false;
+    invincibilityFrames = 0;
+
+    // State flags
+    isFacingRight = true;
+    isJumping = false;
+    hasDoubleJump = true;
+    isAttacking = false;
+    isShielding = false;
+    shieldHealth = MAX_SHIELD_HEALTH;
+    isDodging = false;
+    dodgeFrames = 0;
+    isFastFalling = false;
+
+    // Animation variables
+    currentFrame = 0;
+    framesCounter = 0;
+    framesSpeed = 8;
+    isHitstun = false;
+    hitstunFrames = 0;
+
+    // State machine
+    state = IDLE;
+
+    // Attack state
+    currentAttack = NONE;
+    attackDuration = 0;
+    attackFrame = 0;
+    canAttack = true;
+
+    // Grab state
+    isGrabbing = false;
+    grabbedCharacter = nullptr;
+    grabDuration = 0;
+    grabFrame = 0;
+
+    // Cooldowns
+    specialNeutralCD = {120, 0};
+    specialSideCD = {90, 0};
+    specialUpCD = {60, 0};
+    specialDownCD = {120, 0};
+    dodgeCD = {DODGE_COOLDOWN, 0};
+
+    // Death animation
+    isDying = false;
+    deathRotation = 0;
+    deathScale = 1.0f;
+    deathDuration = 60;
+    deathFrame = 0;
+    deathVelocity = {0, 0};
+    deathPosition = {0, 0};
+}
 
 Rectangle Character::getRect() {
-    return {position.x - width/2, position.y - height, width, height};
+    return {position.x - width/2, position.y - height/2, width, height};
+}
+
+Rectangle Character::getHurtbox() {
+    // Hurtbox is slightly smaller than visual character size
+    float hurtboxScale = 0.85f;
+    float adjustedWidth = width * hurtboxScale;
+    float adjustedHeight = height * hurtboxScale;
+    return {position.x - adjustedWidth/2, position.y - adjustedHeight/2, adjustedWidth, adjustedHeight};
 }
 
 void Character::update(std::vector<Platform>& platforms) {
-    // If dying, handle death animation
+    // Skip updates if dying
     if (isDying) {
         updateDeathAnimation();
         return;
     }
+
+    // Update cooldowns
+    updateCooldowns();
+
+    // Variables used across all states
+    bool onGround = false;
     
-    // Apply gravity if not recovering with up-B
-    if (!isRecovering) {
-        velocity.y += GRAVITY;
-    }
+    // Variables for collision detection (defined outside switch to avoid redeclaration errors)
+    const int collisionSteps = 4; // Number of sub-steps for collision checking
+    float stepX = 0;
+    float stepY = 0;
+    float modifiedVelocityX = 0;
     
-    // Apply velocity
-    position.x += velocity.x;
-    position.y += velocity.y;
-    
-    // Handle platform collisions
-    isJumping = true;
-    for (auto& platform : platforms) {
-        Rectangle charRect = getRect();
-        
-        if (CheckCollisionRecs(charRect, platform.rect)) {
-            // Check if landing on top of platform
-            if (velocity.y > 0 && charRect.y + charRect.height - velocity.y <= platform.rect.y) {
-                position.y = platform.rect.y;
-                velocity.y = 0;
-                isJumping = false;
-                isRecovering = false; // End recovery when landing
+    // Process current state
+    switch (state) {
+        case IDLE:
+        case RUNNING:
+        case JUMPING:
+        case FALLING:
+            // Apply gravity
+            if (isFastFalling) {
+                velocity.y += FAST_FALL_GRAVITY;
+            } else {
+                velocity.y += GRAVITY;
             }
-            // Side or bottom collision - push out
-            else {
-                if (velocity.x > 0) position.x = platform.rect.x - width/2;
-                else if (velocity.x < 0) position.x = platform.rect.x + platform.rect.width + width/2;
-                velocity.x = 0;
+
+            // Setup sub-frame precision for collision detection
+            // This prevents phasing through platforms at high speeds
+            stepX = velocity.x / collisionSteps;
+            stepY = velocity.y / collisionSteps;
+            
+            for (int step = 0; step < collisionSteps; step++) {
+                // Apply partial movement
+                position.x += stepX;
+                position.y += stepY;
+                
+                // Platform collision on each sub-step
+                for (auto& platform : platforms) {
+                    Rectangle playerRect = getRect();
+                    if (CheckCollisionRecs(playerRect, platform.rect)) {
+                        // Top collision - only check if moving downward
+                        if (stepY > 0) {
+                            if (playerRect.y + playerRect.height > platform.rect.y &&
+                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
+                                position.y = platform.rect.y - height / 2;
+                                velocity.y = 0;
+                                onGround = true;
+                                
+                                // Reset states that need ground
+                                if (isJumping) isJumping = false;
+                                hasDoubleJump = true;
+                                isHitstun = false;
+                                break; // Found a top collision, stop checking other platforms
+                            }
+                        }
+                        
+                        // Side collisions - prevent movement into platforms
+                        if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
+                            playerRect.y + playerRect.height > platform.rect.y + 5) {
+                            position.x = platform.rect.x - width / 2;
+                            velocity.x = 0;
+                        } else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
+                                   playerRect.y + playerRect.height > platform.rect.y + 5) {
+                            position.x = platform.rect.x + platform.rect.width + width / 2;
+                            velocity.x = 0;
+                        }
+                    }
+                }
             }
-        }
+
+            // Update state based on movement
+            if (onGround) {
+                if (fabs(velocity.x) > 0.5f) {
+                    changeState(RUNNING);
+                } else {
+                    changeState(IDLE);
+                }
+            } else {
+                if (velocity.y < 0) {
+                    changeState(JUMPING);
+                } else {
+                    changeState(FALLING);
+                }
+
+            }
+
+            // Apply friction
+            if (onGround) {
+                velocity.x *= 0.9f;
+                if (fabs(velocity.x) < 0.1f) velocity.x = 0;
+            } else {
+                velocity.x *= 0.98f; // Less friction in air
+            }
+
+            // Update attack positions if attacking
+            if (isAttacking) {
+                updateAttackPositions();
+                attackFrame++;
+
+                // End attack when duration is over
+                if (attackFrame >= attackDuration) {
+                    resetAttackState();
+                }
+            }
+
+            // Update hitstun
+            if (isHitstun) {
+                hitstunFrames--;
+                if (hitstunFrames <= 0) {
+                    isHitstun = false;
+                }
+            }
+
+            // Update invincibility
+            if (isInvincible) {
+                invincibilityFrames--;
+                if (invincibilityFrames <= 0) {
+                    isInvincible = false;
+                }
+            }
+            break;
+
+        case ATTACKING:
+            // Apply gravity during attacks unless it's a specific air attack type
+            velocity.y += GRAVITY;
+
+            // Limited horizontal movement during attacks
+            modifiedVelocityX = velocity.x * 0.5f;
+            
+            // Setup sub-frame precision for collision detection
+            stepX = modifiedVelocityX / collisionSteps;
+            stepY = velocity.y / collisionSteps;
+            
+            for (int step = 0; step < collisionSteps; step++) {
+                // Apply partial movement
+                position.x += stepX;
+                position.y += stepY;
+                
+                // Platform collision on each sub-step
+                for (auto& platform : platforms) {
+                    Rectangle playerRect = getRect();
+                    if (CheckCollisionRecs(playerRect, platform.rect)) {
+                        // Top collision
+                        if (stepY > 0) {
+                            if (playerRect.y + playerRect.height > platform.rect.y &&
+                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
+                                position.y = platform.rect.y - height / 2;
+                                velocity.y = 0;
+                                
+                                // Ground attacks continue
+                                // Air attacks may cancel on landing
+                                if (currentAttack >= NEUTRAL_AIR && currentAttack <= DOWN_AIR) {
+                                    resetAttackState();
+                                    changeState(IDLE);
+                                }
+                                break; // Found a top collision, stop checking other platforms
+                            }
+                        }
+                        
+                        // Side collisions - prevent movement into platforms
+                        if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
+                            playerRect.y + playerRect.height > platform.rect.y + 5) {
+                            position.x = platform.rect.x - width / 2;
+                            velocity.x = 0;
+                        } else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
+                                  playerRect.y + playerRect.height > platform.rect.y + 5) {
+                            position.x = platform.rect.x + platform.rect.width + width / 2;
+                            velocity.x = 0;
+                        }
+                    }
+                }
+            }
+
+            // Update attack positions
+            updateAttackPositions();
+            attackFrame++;
+
+            // End attack when duration is over
+            if (attackFrame >= attackDuration) {
+                resetAttackState();
+
+                // Return to appropriate state
+                if (velocity.y < 0) {
+                    changeState(JUMPING);
+                } else if (velocity.y > 0) {
+                    changeState(FALLING);
+                } else {
+                    changeState(IDLE);
+                }
+            }
+            break;
+
+        case SHIELDING:
+            // Slowly regenerate shield
+            shieldHealth = std::min(shieldHealth + SHIELD_REGEN_RATE, MAX_SHIELD_HEALTH);
+
+            // No movement while shielding
+            velocity.x = 0;
+            velocity.y = 0;
+            break;
+
+        case DODGING:
+            dodgeFrames++;
+
+            // Check for invincibility frames
+            if (dodgeFrames >= DODGE_INVINCIBLE_START && dodgeFrames <= DODGE_INVINCIBLE_END) {
+                isInvincible = true;
+            } else {
+                isInvincible = false;
+            }
+
+            // End dodge after duration
+            if (dodgeFrames >= SPOT_DODGE_FRAMES) {
+                isDodging = false;
+                dodgeFrames = 0;
+                isInvincible = false;
+                changeState(IDLE);
+                dodgeCD.current = dodgeCD.duration; // Start cooldown
+            }
+            break;
+
+
+        case HITSTUN:
+            // Apply gravity
+            velocity.y += GRAVITY;
+
+            // Setup sub-frame precision for collision detection
+            // This prevents phasing through platforms at high speeds
+            stepX = velocity.x / collisionSteps;
+            stepY = velocity.y / collisionSteps;
+            
+            for (int step = 0; step < collisionSteps; step++) {
+                // Apply partial movement
+                position.x += stepX;
+                position.y += stepY;
+                
+                // Platform collision on each sub-step
+                for (auto& platform : platforms) {
+                    Rectangle playerRect = getRect();
+                    if (CheckCollisionRecs(playerRect, platform.rect)) {
+                        // Top collision
+                        if (stepY > 0) {
+                            if (playerRect.y + playerRect.height > platform.rect.y &&
+                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
+                                position.y = platform.rect.y - height / 2;
+                                velocity.y = 0;
+                                break; // Found a top collision, stop checking other platforms
+                            }
+                        }
+                        
+                        // Side collisions
+                        if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
+                            playerRect.y + playerRect.height > platform.rect.y + 5) {
+                            position.x = platform.rect.x - width / 2;
+                            velocity.x = 0;
+                        } else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
+                                   playerRect.y + playerRect.height > platform.rect.y + 5) {
+                            position.x = platform.rect.x + platform.rect.width + width / 2;
+                            velocity.x = 0;
+                        }
+                    }
+                }
+            }
+
+            // Decrement hitstun
+            hitstunFrames--;
+            if (hitstunFrames <= 0) {
+                isHitstun = false;
+
+                // Return to appropriate state
+                if (velocity.y == 0) {
+                    changeState(IDLE);
+                } else if (velocity.y < 0) {
+                    changeState(JUMPING);
+                } else {
+                    changeState(FALLING);
+                }
+            }
+            break;
     }
-    
-    // Screen boundaries
-    if (position.x - width/2 < 0) {
-        position.x = width/2;
-        velocity.x = 0;
-    }
-    if (position.x + width/2 > SCREEN_WIDTH) {
-        position.x = SCREEN_WIDTH - width/2;
-        velocity.x = 0;
-    }
-    
-    // Check if character fell off screen - start death animation
-    if (position.y > SCREEN_HEIGHT + 100) {
+
+    // Check if out of bounds
+    if (isOutOfBounds()) {
         startDeathAnimation();
     }
-    
-    // Update attacks
-    attacks.erase(
-        std::remove_if(attacks.begin(), attacks.end(), [](AttackBox& a) { 
-            return !a.update(); 
-        }),
-        attacks.end()
-    );
-    
-    // Update attack hitbox positions to follow character
-    updateAttackPositions();
-    
-    // Update cooldowns
-    if (currentCooldown > 0) currentCooldown--;
-    if (currentSideCooldown > 0) currentSideCooldown--;
-    if (currentUpCooldown > 0) currentUpCooldown--;
-    if (currentDownCooldown > 0) currentDownCooldown--;
-    
-    // Update attack state
-    if (isAttacking) {
-        attackFrame++;
-        
-        // Check if attack is finished
-        if (attackFrame >= attackDuration) {
-            resetAttackState();
-        }
-        // For recovery move, end the recovery state after a certain duration
-        else if (currentAttack == SPECIAL_UP && attackFrame > attackDuration / 2) {
-            isRecovering = false;
+
+    // Update hit effects
+    for (int i = 0; i < hitEffects.size(); i++) {
+        if (!hitEffects[i].update()) {
+            hitEffects.erase(hitEffects.begin() + i);
+            i--;
         }
     }
-    
-    // Animation logic
-    framesCounter++;
-    if (framesCounter >= 60/framesSpeed) {
-        framesCounter = 0;
-        currentFrame++;
-        if (currentFrame > 3) currentFrame = 0;
-    }
-    
-    // Damping velocity for smoother movement
-    if (!isRecovering) {
-        velocity.x *= 0.9f;
-        if (std::abs(velocity.x) < 0.1f) velocity.x = 0;
-    }
+
+    // Attack hitbox collision needs to be handled externally now (in Game.cpp)
+    // since we removed the characters vector parameter from update
 }
 
 void Character::updateAttackPositions() {
-    // Update attack hitboxes positions to follow the character
     for (auto& attack : attacks) {
-        // Only update position for active attacks that belong to current attack type
-        if (attack.currentFrame < attack.duration / 2) {
-            switch (currentAttack) {
-                case NEUTRAL:
-                    {
-                        float attackWidth = width * 1.2f;
-                        float attackX = isFacingRight ? position.x + width*0.3f : position.x - width*0.3f - attackWidth;
-                        attack.rect.x = attackX;
-                        attack.rect.y = position.y - height * 0.8f;
-                    }
-                    break;
-                case SIDE:
-                    {
-                        float attackWidth = width * 1.5f;
-                        float attackX = isFacingRight ? position.x + width*0.4f : position.x - width*0.4f - attackWidth;
-                        attack.rect.x = attackX;
-                        attack.rect.y = position.y - height * 0.7f;
-                    }
-                    break;
-                case UP:
-                    {
-                        attack.rect.x = position.x - width * 0.7f;
-                        attack.rect.y = position.y - height * 1.5f;
-                    }
-                    break;
-                case DOWN:
-                    {
-                        attack.rect.x = position.x - width;
-                        attack.rect.y = position.y;
-                    }
-                    break;
-                case SPECIAL_NEUTRAL:
-                    {
-                        float attackWidth = width * 3.0f;
-                        float attackX = isFacingRight ? position.x + width/2 : position.x - width/2 - attackWidth;
-                        attack.rect.x = attackX;
-                        attack.rect.y = position.y - height * 0.6f;
-                    }
-                    break;
-                case SPECIAL_SIDE:
-                    {
-                        attack.rect.x = position.x - width;
-                        attack.rect.y = position.y - height;
-                    }
-                    break;
-                case SPECIAL_UP:
-                    {
-                        attack.rect.x = position.x - width/2;
-                        attack.rect.y = position.y;
-                    }
-                    break;
-                case SPECIAL_DOWN:
-                    {
-                        attack.rect.x = position.x - width * 1.5f;
-                        attack.rect.y = position.y - height * 1.5f;
-                    }
-                    break;
-                default:
-                    break;
-            }
-        }
+        // Position the attack box relative to the character
+        float offsetX = isFacingRight ? 1.0f : -1.0f;
+        float boxCenterX = position.x + (attack.rect.width / 2) * offsetX;
+
+        // Adjust based on attack box original position
+        attack.rect.x = boxCenterX - (attack.rect.width / 2);
+        attack.rect.y = position.y - (attack.rect.height / 2);
     }
 }
 
+void Character::updateCooldowns() {
+    // Update all cooldowns
+    if (specialNeutralCD.current > 0) specialNeutralCD.current--;
+    if (specialSideCD.current > 0) specialSideCD.current--;
+    if (specialUpCD.current > 0) specialUpCD.current--;
+    if (specialDownCD.current > 0) specialDownCD.current--;
+    if (dodgeCD.current > 0) dodgeCD.current--;
+}
+
+void Character::changeState(CharacterState newState) {
+    // Don't change state if already in hitstun
+    if (state == HITSTUN && newState != DYING && hitstunFrames > 0) {
+        return;
+    }
+
+    // Don't change state if currently attacking, unless hit or dying
+    if (state == ATTACKING && newState != HITSTUN && newState != DYING && attackFrame < attackDuration) {
+        return;
+    }
+
+    // State change logic
+    state = newState;
+
+    // State-specific init
+    switch (newState) {
+        case IDLE:
+            velocity.x *= 0.5f; // Slow down when returning to idle
+            break;
+
+        case JUMPING:
+            // Animation reset
+            break;
+
+        case ATTACKING:
+            // Attack init handled by specific attack methods
+            break;
+
+        case SHIELDING:
+            velocity.x = 0;
+            velocity.y = 0;
+            break;
+
+        case DODGING:
+            dodgeFrames = 0;
+            isDodging = true;
+            break;
+
+        case HITSTUN:
+            // Handled by applyKnockback
+            break;
+
+        case DYING:
+            // Handled by startDeathAnimation
+            break;
+    }
+}
+
+void Character::draw() {
+    // Skip normal drawing if dying
+    if (isDying) {
+        drawDeathAnimation();
+        return;
+    }
+
+    // Visual effects for states
+    Color drawColor = color;
+
+    // Flashing for invincibility
+    if (isInvincible) {
+        if ((framesCounter / 3) % 2 == 0) {
+            drawColor.a = 128; // Half opacity
+        }
+    }
+
+    // Damage gradient
+    if (damagePercent > 0) {
+        // Gradually shift to red as damage increases
+        float damageRatio = std::min(damagePercent / 150.0f, 1.0f);
+        drawColor.r = std::min(255, drawColor.r + static_cast<int>(damageRatio * 100));
+        drawColor.g = std::max(0, drawColor.g - static_cast<int>(damageRatio * 80));
+        drawColor.b = std::max(0, drawColor.b - static_cast<int>(damageRatio * 80));
+    }
+
+    // Basic character drawing
+    DrawRectangle(
+        static_cast<int>(position.x - width/2),
+        static_cast<int>(position.y - height/2),
+        static_cast<int>(width),
+        static_cast<int>(height),
+        drawColor
+    );
+
+    // Direction indicator (eyes/face)
+    float eyeOffset = isFacingRight ? width * 0.2f : -width * 0.2f;
+    DrawCircle(
+        static_cast<int>(position.x + eyeOffset),
+        static_cast<int>(position.y - height * 0.1f),
+        width * 0.15f,
+        BLACK
+    );
+
+    // Shield visualization
+    if (isShielding) {
+        float shieldRatio = shieldHealth / MAX_SHIELD_HEALTH;
+        float shieldSize = (width + height) * 0.4f * shieldRatio;
+        Color shieldColor = {100, 200, 255, 128}; // Semi-transparent blue
+
+        // Shield color shifts to red as it weakens
+        shieldColor.g = static_cast<unsigned char>(200 * shieldRatio);
+        shieldColor.b = static_cast<unsigned char>(255 * shieldRatio);
+
+        DrawCircleV(position, shieldSize, shieldColor);
+    }
+
+    // Draw hitboxes if attacking (for debug)
+    if (isAttacking) {
+        for (auto& attack : attacks) {
+            attack.draw(true);
+        }
+    }
+
+    // Draw hit effects
+    for (auto& effect : hitEffects) {
+        effect.draw();
+    }
+
+    // Draw percentage above character
+    char damageText[10];
+    sprintf(damageText, "%.0f%%", damagePercent);
+    DrawText(
+        damageText,
+        static_cast<int>(position.x - width/2),
+        static_cast<int>(position.y - height - 20),
+        20,
+        WHITE
+    );
+
+    // Animation counter
+    framesCounter++;
+}
+
 void Character::startDeathAnimation() {
-    isDying = true;
-    deathFrame = 0;
-    deathRotation = 0;
-    deathScale = 1.0f;
-    deathPosition = position;
-    
-    // Set initial blast-off velocity (upward and away from center)
-    float directionX = (deathPosition.x < SCREEN_WIDTH / 2) ? -5.0f : 5.0f;
-    deathVelocity = {directionX, -15.0f};
-    
-    // Clear any attacks
-    attacks.clear();
-    resetAttackState();
+    if (!isDying) {
+        isDying = true;
+        state = DYING;
+        deathFrame = 0;
+        deathRotation = 0;
+        deathScale = 1.0f;
+
+        // Set initial death velocity based on current velocity
+        deathVelocity = velocity;
+        if (deathVelocity.y > -5.0f) deathVelocity.y = -5.0f; // Ensure upward motion
+
+        // Store position at death
+        deathPosition = position;
+
+        // Reduce stock
+        stocks--;
+    }
 }
 
 void Character::updateDeathAnimation() {
     deathFrame++;
-    
-    // Update death position
-    deathVelocity.y += 0.2f; // Lighter gravity for dramatic effect
+
+    // Update death position with velocity
     deathPosition.x += deathVelocity.x;
     deathPosition.y += deathVelocity.y;
-    
-    // Update rotation and scale
-    deathRotation += 15.0f; // Spin speed
-    deathScale -= 0.01f;
-    if (deathScale < 0.01f) deathScale = 0.01f;
-    
-    // Check if death animation is complete
+
+    // Apply gravity to death animation
+    deathVelocity.y += GRAVITY * 0.5f;
+
+    // Spin and shrink
+    deathRotation += 15.0f;
+    deathScale = std::max(0.0f, 1.0f - static_cast<float>(deathFrame) / deathDuration);
+
+    // End death animation
     if (deathFrame >= deathDuration) {
-        // Reset character
         isDying = false;
-        position.x = SCREEN_WIDTH / 2.0f;
-        position.y = 100.0f;
-        velocity.x = 0.0f;
-        velocity.y = 0.0f;
-        damage = 0;
-        deathScale = 1.0f;
-        deathRotation = 0;
+
+        if (stocks > 0) {
+            // Reset for respawn
+            damagePercent = 0;
+            velocity = {0, 0};
+            isInvincible = true;
+            invincibilityFrames = 120; // 2 seconds of invincibility
+
+            // Respawn at center top
+            position.x = SCREEN_WIDTH / 2;
+            position.y = 100;
+
+            changeState(FALLING);
+        }
+    }
+}
+
+void Character::drawDeathAnimation() {
+    // Draw spinning, shrinking character
+    Rectangle destRect = {
+        deathPosition.x,
+        deathPosition.y,
+        width * deathScale,
+        height * deathScale
+    };
+
+    // Center the rectangle for rotation
+    destRect.x -= destRect.width / 2;
+    destRect.y -= destRect.height / 2;
+
+    // Draw rotated rectangle
+    DrawRectanglePro(
+        destRect,
+        {destRect.width / 2, destRect.height / 2},
+        deathRotation,
+        color
+    );
+
+    // Star burst effect near end of animation
+    if (deathFrame > deathDuration * 0.7f && deathFrame % 3 == 0) {
+        float starAngle = static_cast<float>(GetRandomValue(0, 360));
+        float starDist = static_cast<float>(GetRandomValue(10, 30));
+        Vector2 starPos = {
+            deathPosition.x + cosf(starAngle * DEG2RAD) * starDist,
+            deathPosition.y + sinf(starAngle * DEG2RAD) * starDist
+        };
+
+        DrawCircleV(starPos, 5.0f * deathScale, WHITE);
     }
 }
 
 void Character::resetAttackState() {
     isAttacking = false;
-    isSpecialAttack = false;
-    attackFrame = 0;
     currentAttack = NONE;
+    attackDuration = 0;
+    attackFrame = 0;
+    attacks.clear();
     canAttack = true;
-    
-    // We don't want to reset the position when ending an attack
-    // No position resetting should happen here
 }
 
-void Character::draw() {
-    if (isDying) {
-        drawDeathAnimation();
-        return;
-    }
-    
-    Rectangle charRect = getRect();
-    
-    // Draw character
-    DrawRectangleRec(charRect, color);
-    
-    // Draw toilet bowl features if this is "The Throne"
-    if (name == "The Throne") {
-        // Draw toilet base
-        DrawRectangleRounded({charRect.x, charRect.y + charRect.height * 0.6f, charRect.width, charRect.height * 0.4f}, 0.5f, 10, LIGHTGRAY);
-        
-        // Draw toilet seat
-        DrawRectangleRounded({charRect.x, charRect.y, charRect.width, charRect.height * 0.2f}, 0.5f, 10, WHITE);
-        
-        // Draw the mysterious head in the bowl (hide during some attack animations)
-        bool showHead = true;
-        if (isAttacking) {
-            if (currentAttack == SPECIAL_NEUTRAL || currentAttack == SPECIAL_UP || 
-                currentAttack == DOWN || currentAttack == SPECIAL_DOWN) {
-                showHead = false;
-            }
-        }
-        
-        if (showHead) {
-            DrawCircle(position.x, position.y - height * 0.4f, width * 0.15f, PINK);
-            
-            // Eyes for the head
-            float headEyeOffset = 5;
-            DrawCircle(position.x - headEyeOffset, position.y - height * 0.45f, width * 0.05f, BLACK);
-            DrawCircle(position.x + headEyeOffset, position.y - height * 0.45f, width * 0.05f, BLACK);
-        }
-        
-        // Special attack visualizations
-        if (isAttacking) {
-            switch (currentAttack) {
-                case SPECIAL_NEUTRAL: // Water Cannon
-                    {
-                        float attackWidth = width * 3.0f * ((float)attackFrame / attackDuration);
-                        float attackX = isFacingRight ? position.x + width/2 : position.x - width/2 - attackWidth;
-                        Color waterColor = SKYBLUE;
-                        waterColor.a = 180;
-                        DrawRectangleRounded({attackX, position.y - height * 0.5f, attackWidth, height * 0.3f}, 0.5f, 10, waterColor);
-                    }
-                    break;
-                case SPECIAL_SIDE: // Rolling Flush
-                    {
-                        Color spinColor = SKYBLUE;
-                        spinColor.a = 150;
-                        DrawCircleV(position, width * 0.8f, spinColor);
-                    }
-                    break;
-                case SPECIAL_UP: // Geyser Recovery
-                    {
-                        Color geyserColor = SKYBLUE;
-                        geyserColor.a = 200 - (attackFrame * 5);
-                        DrawTriangle(
-                            {position.x, position.y},
-                            {position.x - width/2, position.y + height},
-                            {position.x + width/2, position.y + height},
-                            geyserColor
-                        );
-                    }
-                    break;
-                case SPECIAL_DOWN: // Swirl Counter
-                    {
-                        for (int i = 0; i < 8; i++) {
-                            float angle = (i * 45.0f + attackFrame * 12.0f) * DEG2RAD;
-                            float radius = width * (0.5f + (float)attackFrame / attackDuration);
-                            Vector2 pos = {
-                                position.x + (float)cos(angle) * radius,
-                                position.y - height/2 + (float)sin(angle) * radius
-                            };
-                            Color swirlColor = SKYBLUE;
-                            swirlColor.a = 150;
-                            DrawCircleV(pos, 5.0f, swirlColor);
-                        }
-                    }
-                    break;
-                default:
-                    break;
-            }
-        }
-    } else if (name == "The Plunger") {
-        // Draw plunger head (red rubber part)
-        DrawCircle(position.x, position.y - height * 0.15f, width * 0.4f, RED);
-        
-        // Draw plunger stick
-        DrawRectangle(position.x - width * 0.1f, position.y - height, width * 0.2f, height * 0.8f, BROWN);
-    }
-    
-    // Draw eyes (for both characters)
-    float eyeOffsetX = isFacingRight ? width * 0.2f : -width * 0.2f;
-    DrawCircle(position.x + eyeOffsetX, position.y - height * 0.7f, width * 0.1f, WHITE);
-    DrawCircle(position.x + eyeOffsetX, position.y - height * 0.7f, width * 0.05f, BLACK);
-    
-    // Draw damage percentage
-    DrawText(TextFormat("%d%%", damage), (int)position.x - 20, (int)position.y - height - 30, 20, RED);
-    
-    // Draw cooldown indicators
-    if (currentCooldown > 0) {
-        DrawRectangle((int)position.x - 25, (int)position.y - height - 50, 50 * (float)currentCooldown / specialCooldown, 5, BLUE);
-    }
-    if (currentSideCooldown > 0) {
-        DrawRectangle((int)position.x - 25, (int)position.y - height - 57, 50 * (float)currentSideCooldown / specialSideCooldown, 5, GREEN);
-    }
-    if (currentUpCooldown > 0) {
-        DrawRectangle((int)position.x - 25, (int)position.y - height - 64, 50 * (float)currentUpCooldown / specialUpCooldown, 5, PURPLE);
-    }
-    if (currentDownCooldown > 0) {
-        DrawRectangle((int)position.x - 25, (int)position.y - height - 71, 50 * (float)currentDownCooldown / specialDownCooldown, 5, YELLOW);
-    }
-    
-    // Draw attacks
-    for (auto& attack : attacks) {
-        attack.draw();
-    }
+void Character::respawn(Vector2 spawnPoint) {
+    position = spawnPoint;
+    velocity = {0, 0};
+    damagePercent = 0;
+    isInvincible = true;
+    invincibilityFrames = 120; // 2 seconds of invincibility
+    resetAttackState();
+    changeState(FALLING);
 }
 
-void Character::drawDeathAnimation() {
-    // Calculate the alpha (transparency) based on death animation progress
-    float alpha = 255.0f * (1.0f - (float)deathFrame / deathDuration);
-    Color fadeColor = color;
-    fadeColor.a = (unsigned char)alpha;
-    
-    // Draw character with rotation and scaling
-    Rectangle charRect = {
-        deathPosition.x - width/2 * deathScale,
-        deathPosition.y - height * deathScale,
-        width * deathScale,
-        height * deathScale
-    };
-    
-    // Draw using rotation
-    Vector2 origin = {width/2 * deathScale, height * deathScale / 2};
-    DrawRectanglePro(
-        {charRect.x + origin.x, charRect.y + origin.y, charRect.width, charRect.height},
-        origin,
-        deathRotation,
-        fadeColor
-    );
-    
-    // Draw an explosion/blast effect
-    if (deathFrame < 20) {
-        float blastSize = 30.0f + deathFrame * 3.0f;
-        Color blastColor = WHITE;
-        blastColor.a = 255 - deathFrame * 12;
-        DrawCircleV(deathPosition, blastSize, blastColor);
-    }
-}
-
+// Movement methods
 void Character::jump() {
-    if (!isJumping && !isAttacking && !isDying) {
+    if (!isJumping && state != JUMPING) {
         velocity.y = JUMP_FORCE;
         isJumping = true;
+        changeState(JUMPING);
+    } else if (hasDoubleJump) {
+        doubleJump();
+    }
+}
+
+void Character::doubleJump() {
+    if (hasDoubleJump) {
+        velocity.y = DOUBLE_JUMP_FORCE;
+        hasDoubleJump = false;
+        changeState(JUMPING);
     }
 }
 
 void Character::moveLeft() {
-    if ((!isAttacking || currentAttack == SPECIAL_SIDE) && !isDying) { // Allow movement during side special
+    if (state != SHIELDING && state != DODGING) {
         velocity.x = -speed;
         isFacingRight = false;
+
+        if (state == IDLE) {
+            changeState(RUNNING);
+        }
     }
 }
 
 void Character::moveRight() {
-    if ((!isAttacking || currentAttack == SPECIAL_SIDE) && !isDying) { // Allow movement during side special
+    if (state != SHIELDING && state != DODGING) {
         velocity.x = speed;
         isFacingRight = true;
-    }
-}
 
-// Standard attacks
-void Character::neutralAttack() {
-    if (!isAttacking && canAttack && !isDying) {
-        isAttacking = true;
-        canAttack = false;
-        currentAttack = NEUTRAL;
-        attackDuration = 15;
-        attackFrame = 0;
-        
-        // Bowl Slap - quick hit with toilet lid
-        float attackWidth = width * 1.2f;
-        float attackX = isFacingRight ? position.x + width*0.3f : position.x - width*0.3f - attackWidth;
-        
-        Rectangle attackRect = {
-            attackX, 
-            position.y - height * 0.8f, 
-            attackWidth, 
-            height * 0.4f
-        };
-        
-        // Only add the attack if we're not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 5, isFacingRight ? 5.0f : -5.0f, -2.0f, 10));
+        if (state == IDLE) {
+            changeState(RUNNING);
         }
     }
 }
 
-void Character::sideAttack() {
-    if (!isAttacking && canAttack && !isDying) {
+void Character::fastFall() {
+    if (velocity.y > 0) {
+        isFastFalling = true;
+        velocity.y = std::max(velocity.y, 5.0f); // Minimum fast fall speed
+    }
+}
+
+// Defense methods
+void Character::shield() {
+    if (state != JUMPING && state != FALLING && !isAttacking &&
+        shieldHealth > 0 && !isDodging) {
+        changeState(SHIELDING);
+        isShielding = true;
+    }
+}
+
+void Character::releaseShield() {
+    if (isShielding) {
+        isShielding = false;
+        changeState(IDLE);
+    }
+}
+
+void Character::spotDodge() {
+    if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
+        changeState(DODGING);
+        dodgeFrames = 0;
+        velocity.x = 0;
+        velocity.y = 0;
+    }
+}
+
+void Character::forwardDodge() {
+    if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
+        changeState(DODGING);
+        dodgeFrames = 0;
+        velocity.x = isFacingRight ? speed * 1.5f : -speed * 1.5f;
+        velocity.y = 0;
+    }
+}
+
+void Character::backDodge() {
+    if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
+        changeState(DODGING);
+        dodgeFrames = 0;
+        velocity.x = isFacingRight ? -speed * 1.5f : speed * 1.5f;
+        velocity.y = 0;
+    }
+}
+
+void Character::airDodge(float dirX, float dirY) {
+    if ((state == JUMPING || state == FALLING) && dodgeCD.current <= 0) {
+        changeState(DODGING);
+        dodgeFrames = 0;
+
+        // Normalize direction and apply speed
+        float length = sqrtf(dirX * dirX + dirY * dirY);
+        if (length > 0) {
+            velocity.x = (dirX / length) * speed * 1.5f;
+            velocity.y = (dirY / length) * speed * 1.5f;
+        }
+    }
+}
+
+
+// Standard ground attacks
+void Character::jab() {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
         isAttacking = true;
-        canAttack = false;
-        currentAttack = SIDE;
+        currentAttack = JAB;
         attackDuration = 20;
-        attackFrame = 0;
-        
-        // Flush Rush - charging forward attack
-        float attackWidth = width * 1.5f;
-        float attackX = isFacingRight ? position.x + width*0.4f : position.x - width*0.4f - attackWidth;
-        
-        Rectangle attackRect = {
-            attackX, 
-            position.y - height * 0.7f, 
-            attackWidth, 
-            height * 0.6f
-        };
-        
-        // Only add if not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 8, isFacingRight ? 7.0f : -7.0f, -1.0f, 15));
-        }
-        
-        // Add forward momentum
-        velocity.x += isFacingRight ? 8.0f : -8.0f;
+        changeState(ATTACKING);
+
+        // Create a simple jab hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 0.5f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 3.0f, 2.0f, 0.1f, isFacingRight ? 0.0f : 180.0f, 10, 10));
     }
 }
 
-void Character::upAttack() {
-    if (!isAttacking && canAttack && !isDying) {
+void Character::forwardTilt() {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
         isAttacking = true;
-        canAttack = false;
-        currentAttack = UP;
-        attackDuration = 18;
-        attackFrame = 0;
-        
-        // Lid Flip - upward attack with toilet lid
-        Rectangle attackRect = {
-            position.x - width * 0.7f, 
-            position.y - height * 1.5f, 
-            width * 1.4f, 
-            height * 0.7f
-        };
-        
-        // Only add if not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 7, isFacingRight ? 3.0f : -3.0f, -8.0f, 12));
-        }
+        currentAttack = FORWARD_TILT;
+        attackDuration = 30;
+        changeState(ATTACKING);
+
+        // Forward tilt hitbox (stronger than jab, more range)
+        float hitboxWidth = width * 1.2f;
+        float hitboxHeight = height * 0.6f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 8.0f, 4.0f, 0.15f, isFacingRight ? 30.0f : 150.0f, 15, 15));
     }
 }
 
-void Character::downAttack() {
-    if (!isAttacking && canAttack && !isDying) {
+void Character::upTilt() {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
         isAttacking = true;
-        canAttack = false;
-        currentAttack = DOWN;
+        currentAttack = UP_TILT;
         attackDuration = 25;
-        attackFrame = 0;
-        
-        // Splash Attack - creates damaging puddle below
-        Rectangle attackRect = {
-            position.x - width, 
-            position.y, 
-            width * 2.0f, 
-            height * 0.5f
+        changeState(ATTACKING);
+
+        // Upward-hitting hitbox
+        float hitboxWidth = width * 0.9f;
+        float hitboxHeight = height * 1.2f;
+        float hitboxX = position.x - hitboxWidth/2;
+        float hitboxY = position.y - hitboxHeight;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 7.0f, 3.0f, 0.2f, 90.0f, 12, 12));
+    }
+}
+
+void Character::downTilt() {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = DOWN_TILT;
+        attackDuration = 20;
+        changeState(ATTACKING);
+
+        // Low-hitting hitbox
+        float hitboxWidth = width * 1.3f;
+        float hitboxHeight = height * 0.4f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y + height/2 - hitboxHeight;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 5.0f, 2.0f, 0.1f, 20.0f, 8, 10));
+    }
+}
+
+void Character::dashAttack() {
+    if (canAttack && (state == RUNNING)) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = DASH_ATTACK;
+        attackDuration = 35;
+        changeState(ATTACKING);
+
+        // Add momentum to dash attack
+        velocity.x = isFacingRight ? speed * 1.5f : -speed * 1.5f;
+
+        // Dash attack hitbox
+        float hitboxWidth = width * 1.1f;
+        float hitboxHeight = height * 0.8f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.15f, isFacingRight ? 40.0f : 140.0f, 20, 20));
+    }
+}
+
+// Smash attacks
+void Character::forwardSmash(float chargeTime) {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = FORWARD_SMASH;
+        attackDuration = 40;
+        changeState(ATTACKING);
+
+        // Charge multiplier (1.0 to 1.5)
+        float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
+
+        // Strong forward-hitting hitbox
+        float hitboxWidth = width * 1.5f;
+        float hitboxHeight = height * 0.7f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(
+            hitboxRect,
+            15.0f * chargeMultiplier,
+            8.0f * chargeMultiplier,
+            0.3f,
+            isFacingRight ? 35.0f : 145.0f,
+            25,
+            15
+        ));
+    }
+}
+
+void Character::upSmash(float chargeTime) {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = UP_SMASH;
+        attackDuration = 35;
+        changeState(ATTACKING);
+
+        // Charge multiplier (1.0 to 1.5)
+        float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
+
+        // Strong upward-hitting hitbox
+        float hitboxWidth = width * 1.0f;
+        float hitboxHeight = height * 1.5f;
+        float hitboxX = position.x - hitboxWidth/2;
+        float hitboxY = position.y - hitboxHeight;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(
+            hitboxRect,
+            14.0f * chargeMultiplier,
+            7.0f * chargeMultiplier,
+            0.35f,
+            90.0f,
+            20,
+            15
+        ));
+    }
+}
+
+void Character::downSmash(float chargeTime) {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = DOWN_SMASH;
+        attackDuration = 35;
+        changeState(ATTACKING);
+
+        // Charge multiplier (1.0 to 1.5)
+        float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
+
+        // Two hitboxes on both sides
+        float hitboxWidth = width * 1.0f;
+        float hitboxHeight = height * 0.5f;
+        float hitboxY = position.y + height/2 - hitboxHeight/2;
+
+        // Left hitbox
+        Rectangle leftHitboxRect = {position.x - width/2 - hitboxWidth, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(
+            leftHitboxRect,
+            13.0f * chargeMultiplier,
+            6.0f * chargeMultiplier,
+            0.3f,
+            20.0f,
+            20,
+            15
+        ));
+
+        // Right hitbox
+        Rectangle rightHitboxRect = {position.x + width/2, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(
+            rightHitboxRect,
+            13.0f * chargeMultiplier,
+            6.0f * chargeMultiplier,
+            0.3f,
+            160.0f,
+            20,
+            15
+        ));
+    }
+}
+
+// Aerial attacks
+void Character::neutralAir() {
+    if (canAttack && (state == JUMPING || state == FALLING)) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = NEUTRAL_AIR;
+        attackDuration = 25;
+        changeState(ATTACKING);
+
+        // Circle hitbox around character
+        float hitboxRadius = width * 1.2f;
+        Rectangle hitboxRect = {
+            position.x - hitboxRadius/2,
+            position.y - hitboxRadius/2,
+            hitboxRadius,
+            hitboxRadius
         };
-        
-        // Only add if not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 6, isFacingRight ? 2.0f : -2.0f, 6.0f, 20));
-        }
+
+        attacks.push_back(AttackBox(hitboxRect, 8.0f, 3.0f, 0.15f, 45.0f, 15, 15));
+    }
+}
+
+void Character::forwardAir() {
+    if (canAttack && (state == JUMPING || state == FALLING)) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = FORWARD_AIR;
+        attackDuration = 30;
+        changeState(ATTACKING);
+
+        // Forward air hitbox
+        float hitboxWidth = width * 1.2f;
+        float hitboxHeight = height * 0.7f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 10.0f, 4.0f, 0.2f, isFacingRight ? 45.0f : 135.0f, 20, 15));
+    }
+}
+
+void Character::backAir() {
+    if (canAttack && (state == JUMPING || state == FALLING)) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = BACK_AIR;
+        attackDuration = 25;
+        changeState(ATTACKING);
+
+        // Back air hitbox (opposite of facing direction)
+        float hitboxWidth = width * 1.0f;
+        float hitboxHeight = height * 0.8f;
+        float hitboxX = isFacingRight ? position.x - width/2 - hitboxWidth : position.x + width/2;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 12.0f, 5.0f, 0.25f, isFacingRight ? 135.0f : 45.0f, 18, 12));
+    }
+}
+
+void Character::upAir() {
+    if (canAttack && (state == JUMPING || state == FALLING)) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = UP_AIR;
+        attackDuration = 25;
+        changeState(ATTACKING);
+
+        // Up air hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 1.0f;
+        float hitboxX = position.x - hitboxWidth/2;
+        float hitboxY = position.y - height/2 - hitboxHeight;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 9.0f, 4.0f, 0.2f, 90.0f, 15, 12));
+    }
+}
+
+void Character::downAir() {
+    if (canAttack && (state == JUMPING || state == FALLING)) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = DOWN_AIR;
+        attackDuration = 30;
+        changeState(ATTACKING);
+
+        // Down air hitbox (spike)
+        float hitboxWidth = width * 0.7f;
+        float hitboxHeight = height * 1.0f;
+        float hitboxX = position.x - hitboxWidth/2;
+        float hitboxY = position.y + height/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+
+        // Create a spike attack
+        AttackBox spike(hitboxRect, 12.0f, 3.0f, 0.15f, 270.0f, 20, 20);
+        spike.canSpike = true;
+        attacks.push_back(spike);
     }
 }
 
 // Special attacks
-void Character::specialNeutralAttack() {
-    if (!isAttacking && canAttack && currentCooldown <= 0 && !isDying) {
+void Character::neutralSpecial() {
+    if (canAttack && specialNeutralCD.current <= 0) {
+        resetAttackState();
         isAttacking = true;
-        isSpecialAttack = true;
-        canAttack = false;
-        currentAttack = SPECIAL_NEUTRAL;
-        attackDuration = 30;
-        attackFrame = 0;
-        currentCooldown = specialCooldown;
-        
-        // Water Cannon - shoots water that pushes enemies
-        float attackWidth = width * 3.0f;
-        float attackX = isFacingRight ? position.x + width/2 : position.x - width/2 - attackWidth;
-        
-        Rectangle attackRect = {
-            attackX, 
-            position.y - height * 0.6f, 
-            attackWidth, 
-            height * 0.3f
-        };
-        
-        // Only add if not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 12, isFacingRight ? 12.0f : -12.0f, -3.0f, 25));
-        }
-    }
-}
-
-void Character::specialSideAttack() {
-    if (!isAttacking && canAttack && currentSideCooldown <= 0 && !isDying) {
-        isAttacking = true;
-        isSpecialAttack = true;
-        canAttack = false;
-        currentAttack = SPECIAL_SIDE;
+        currentAttack = NEUTRAL_SPECIAL;
         attackDuration = 40;
-        attackFrame = 0;
-        currentSideCooldown = specialSideCooldown;
-        
-        // Rolling Flush - rolls forward while spinning water
+        specialNeutralCD.current = specialNeutralCD.duration;
+        changeState(ATTACKING);
+
+        // Projectile hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 0.6f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+
+        // Create a projectile
+        Vector2 projectileVel = {isFacingRight ? 10.0f : -10.0f, 0};
+        attacks.push_back(AttackBox(
+            hitboxRect, 12.0f, 3.0f, 0.1f, isFacingRight ? 0.0f : 180.0f, 20, 60,
+            projectileVel, true
+        ));
+    }
+}
+
+void Character::sideSpecial() {
+    if (canAttack && specialSideCD.current <= 0) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = SIDE_SPECIAL;
+        attackDuration = 40;
+        specialSideCD.current = specialSideCD.duration;
+        changeState(ATTACKING);
+
+        // Add horizontal boost
         velocity.x = isFacingRight ? speed * 2.0f : -speed * 2.0f;
-        
-        // Create a circular attack area around the character
-        Rectangle attackRect = {
-            position.x - width, 
-            position.y - height, 
-            width * 2.0f, 
-            height * 1.2f
-        };
-        
-        // Only add if not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 10, isFacingRight ? 8.0f : -8.0f, -4.0f, 35));
-        }
+
+        // Side special hitbox
+        float hitboxWidth = width * 1.5f;
+        float hitboxHeight = height * 0.9f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 15.0f, 6.0f, 0.25f, isFacingRight ? 30.0f : 150.0f, 25, 25));
     }
 }
 
-void Character::specialUpAttack() {
-    if (!isAttacking && currentUpCooldown <= 0 && !isDying) {
+void Character::upSpecial() {
+    if (canAttack && specialUpCD.current <= 0) {
+        resetAttackState();
         isAttacking = true;
-        isSpecialAttack = true;
-        canAttack = false;
-        currentAttack = SPECIAL_UP;
+        currentAttack = UP_SPECIAL;
+        attackDuration = 40;
+        specialUpCD.current = specialUpCD.duration;
+        changeState(ATTACKING);
+
+        // Recovery move - add vertical boost
+        velocity.y = JUMP_FORCE * 1.2f;
+
+        // Up special hitbox
+        float hitboxWidth = width * 1.2f;
+        float hitboxHeight = height * 1.5f;
+        float hitboxX = position.x - hitboxWidth/2;
+        float hitboxY = position.y - hitboxHeight;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.2f, 90.0f, 20, 20));
+    }
+}
+
+void Character::downSpecial() {
+    if (canAttack && specialDownCD.current <= 0) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = DOWN_SPECIAL;
         attackDuration = 45;
-        attackFrame = 0;
-        isRecovering = true;
-        currentUpCooldown = specialUpCooldown;
-        
-        // Geyser Recovery - water jet recovery move
-        velocity.y = JUMP_FORCE * 1.5f;
-        
-        // Create attack hitbox below character
-        Rectangle attackRect = {
-            position.x - width/2, 
-            position.y, 
-            width, 
-            height
-        };
-        
-        // Only add if not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 8, 0, -10.0f, 20));
-        }
+        specialDownCD.current = specialDownCD.duration;
+        changeState(ATTACKING);
+
+        // Counter/reflector hitbox
+        float hitboxWidth = width * 1.5f;
+        float hitboxHeight = height * 1.5f;
+        float hitboxX = position.x - hitboxWidth/2;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+
+        // Create a reflector hitbox
+        AttackBox reflector(hitboxRect, 6.0f, 3.0f, 0.1f, 45.0f, 15, 30, AttackBox::REFLECTOR);
+        attacks.push_back(reflector);
     }
 }
 
-void Character::specialDownAttack() {
-    if (!isAttacking && canAttack && currentDownCooldown <= 0 && !isDying) {
+// Grab and throws
+void Character::grab() {
+    if (canAttack && !isGrabbing && (state != JUMPING && state != FALLING)) {
+        resetAttackState();
         isAttacking = true;
-        isSpecialAttack = true;
-        canAttack = false;
-        currentAttack = SPECIAL_DOWN;
-        attackDuration = 35;
-        attackFrame = 0;
-        currentDownCooldown = specialDownCooldown;
-        
-        // Swirl Counter - counter move with swirling water
-        // Create circular attack area around character
-        Rectangle attackRect = {
-            position.x - width * 1.5f, 
-            position.y - height * 1.5f, 
-            width * 3.0f, 
-            height * 2.0f
-        };
-        
-        // Only add if not already attacking
-        if (attacks.empty() || attacks.back().currentFrame > 2) {
-            attacks.push_back(AttackBox(attackRect, 13, isFacingRight ? 9.0f : -9.0f, -7.0f, 30));
-        }
+        currentAttack = GRAB;
+        attackDuration = 20;
+        changeState(ATTACKING);
+
+        // Grab hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 0.7f;
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y - hitboxHeight/2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+
+        // Create a grab hitbox
+        AttackBox grabBox(hitboxRect, 0.0f, 0.0f, 0.0f, 0.0f, 0, 10, AttackBox::GRAB);
+        attacks.push_back(grabBox);
     }
 }
 
+void Character::pummel() {
+    if (isGrabbing && grabbedCharacter != nullptr) {
+        // Add damage to grabbed character
+        grabbedCharacter->applyDamage(2.0f);
+
+        // Create hit effect at grabbed character position
+        createHitEffect(grabbedCharacter->position);
+
+        // Reset grab duration to extend hold
+        grabFrame = 0;
+    }
+}
+
+void Character::forwardThrow() {
+    if (isGrabbing && grabbedCharacter != nullptr) {
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(8.0f);
+        grabbedCharacter->applyKnockback(8.0f, 5.0f, 0.2f, isFacingRight ? 1.0f : -1.0f, 0.2f);
+
+        // Create hit effect
+        createHitEffect(grabbedCharacter->position);
+
+        // Release grab
+        releaseGrab();
+    }
+}
+
+void Character::backThrow() {
+    if (isGrabbing && grabbedCharacter != nullptr) {
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(10.0f);
+        grabbedCharacter->applyKnockback(10.0f, 6.0f, 0.25f, isFacingRight ? -1.0f : 1.0f, 0.2f);
+
+        // Create hit effect
+        createHitEffect(grabbedCharacter->position);
+
+        // Release grab
+        releaseGrab();
+    }
+}
+
+void Character::upThrow() {
+    if (isGrabbing && grabbedCharacter != nullptr) {
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(9.0f);
+        grabbedCharacter->applyKnockback(9.0f, 5.0f, 0.22f, 0.0f, -1.0f);
+
+        // Create hit effect
+        createHitEffect(grabbedCharacter->position);
+
+        // Release grab
+        releaseGrab();
+    }
+}
+
+void Character::downThrow() {
+    if (isGrabbing && grabbedCharacter != nullptr) {
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(7.0f);
+        grabbedCharacter->applyKnockback(7.0f, 3.0f, 0.15f, isFacingRight ? 0.5f : -0.5f, 0.8f);
+
+        // Create hit effect
+        createHitEffect(grabbedCharacter->position);
+
+        // Release grab
+        releaseGrab();
+    }
+}
+
+void Character::releaseGrab() {
+    if (isGrabbing && grabbedCharacter != nullptr) {
+        isGrabbing = false;
+        grabbedCharacter = nullptr;
+        grabDuration = 0;
+        grabFrame = 0;
+
+        // Return to idle state
+        changeState(IDLE);
+    }
+}
+
+// Collision and damage
 bool Character::checkHit(Character& other) {
-    // Don't check hits if either character is dying
-    if (isDying || other.isDying) return false;
-    
-    Rectangle otherRect = other.getRect();
-    
+    // Skip if the other character is invincible or dying
+    if (other.isInvincible || other.isDying) return false;
+
+    // Check each attack hitbox
     for (auto& attack : attacks) {
-        if (CheckCollisionRecs(attack.rect, otherRect)) {
-            // Apply damage
-            other.damage += attack.damage;
-            
-            // Apply knockback (scaled by damage)
-            float knockbackMultiplier = 1.0f + other.damage * KNOCKBACK_SCALING;
-            other.velocity.x = attack.knockbackX * knockbackMultiplier;
-            other.velocity.y = attack.knockbackY * knockbackMultiplier;
-            
-            // If damage is very high, potentially cause instant death (blast off)
-            if (other.damage > 150 && GetRandomValue(0, 100) < 25) {
-                other.startDeathAnimation();
+        Rectangle otherHurtbox = other.getHurtbox();
+
+        if (CheckCollisionRecs(attack.rect, otherHurtbox)) {
+            // Handle different hitbox types
+            switch (attack.type) {
+                case AttackBox::GRAB:
+                    // Initiate grab
+                    if (!other.isShielding) {
+                        isGrabbing = true;
+                        grabbedCharacter = &other;
+                        grabDuration = 120; // Hold for 2 seconds max
+                        grabFrame = 0;
+
+                        // Position the grabbed character
+                        float grabOffset = isFacingRight ? width : -width;
+                        other.position.x = position.x + grabOffset;
+                        other.position.y = position.y;
+
+                        other.velocity = {0, 0};
+                        other.isHitstun = true;
+                        other.hitstunFrames = 1; // Keep in hitstun while grabbed
+                    }
+                    break;
+
+                case AttackBox::NORMAL:
+                default:
+                    // Handle shield
+                    if (other.isShielding) {
+                        // Reduce shield health
+                        other.shieldHealth -= attack.damage * SHIELD_DAMAGE_MULTIPLIER;
+
+                        // Shield break
+                        if (other.shieldHealth <= 0) {
+                            other.shieldHealth = 0;
+                            other.isShielding = false;
+                            other.isHitstun = true;
+                            other.hitstunFrames = SHIELD_BREAK_STUN;
+
+                            // Apply upward knockback
+                            other.velocity.y = -8.0f;
+                        }
+
+                        // Shield stun
+                        other.isHitstun = true;
+                        other.hitstunFrames = SHIELD_STUN_FRAMES + attack.shieldStun;
+                    } else {
+                        // Apply damage and knockback
+                        other.applyDamage(attack.damage);
+
+                        // Calculate knockback direction
+                        float knockbackAngle = attack.knockbackAngle * DEG2RAD;
+                        float directionX = cosf(knockbackAngle);
+                        float directionY = sinf(knockbackAngle);
+
+                        // Apply knockback
+                        other.applyKnockback(
+                            attack.damage,
+                            attack.baseKnockback,
+                            attack.knockbackScaling,
+                            directionX,
+                            directionY
+                        );
+
+                        // Create hit effect
+                        Vector2 hitPos = {
+                            (attack.rect.x + attack.rect.width/2 + otherHurtbox.x + otherHurtbox.width/2) / 2,
+                            (attack.rect.y + attack.rect.height/2 + otherHurtbox.y + otherHurtbox.height/2) / 2
+                        };
+                        createHitEffect(hitPos);
+                    }
+                    break;
             }
-            
+
             return true;
         }
     }
-    
+
     return false;
+}
+
+void Character::applyDamage(float damage) {
+    // Add damage percentage, capped at maximum
+    damagePercent = std::min(damagePercent + damage, MAX_DAMAGE);
+}
+
+void Character::applyKnockback(float damage, float baseKnockback, float knockbackScaling, float directionX, float directionY) {
+    // Calculate knockback magnitude (Smash-style formula)
+    float knockbackMagnitude = baseKnockback + (damage * damagePercent * DAMAGE_SCALING * knockbackScaling);
+
+    // Apply knockback vector
+    velocity.x = directionX * knockbackMagnitude;
+    velocity.y = directionY * knockbackMagnitude;
+
+    // Apply hitstun based on knockback
+    int hitstunAmount = static_cast<int>(knockbackMagnitude * HITSTUN_MULTIPLIER);
+    isHitstun = true;
+    hitstunFrames = hitstunAmount;
+
+    // Change state
+    changeState(HITSTUN);
+    
+    // Cap maximum knockback to prevent phasing through floors
+    const float MAX_KNOCKBACK_Y = 20.0f;
+    if (velocity.y > MAX_KNOCKBACK_Y) velocity.y = MAX_KNOCKBACK_Y;
+    if (velocity.y < -MAX_KNOCKBACK_Y) velocity.y = -MAX_KNOCKBACK_Y;
+}
+
+void Character::createHitEffect(Vector2 position) {
+    // Create hit effect at position
+    hitEffects.push_back(HitEffect(position, WHITE));
+}
+
+bool Character::isOutOfBounds() {
+    return position.x < BLAST_ZONE_LEFT ||
+           position.x > BLAST_ZONE_RIGHT ||
+           position.y < BLAST_ZONE_TOP ||
+           position.y > BLAST_ZONE_BOTTOM;
 }
