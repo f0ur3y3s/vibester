@@ -5,7 +5,7 @@
 #include "Character.h"
 #include "Platform.h"
 #include "Particle.h"
-#include "Constants.h"
+#include "GameConfig.h"
 #include <vector>
 #include <string>
 

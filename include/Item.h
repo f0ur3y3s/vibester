@@ -2,7 +2,7 @@
 #define ITEM_H
 
 #include "raylib.h"
-#include "Constants.h"
+#include "GameConfig.h"
 #include "AttackBox.h"
 #include <string>
 #include <vector>

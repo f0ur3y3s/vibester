@@ -54,8 +54,8 @@ int legacy_main() {  // Renamed to avoid duplicate main function
         if (IsKeyPressed(KEY_F)) player.specialDownAttack();
         
         // Simple enemy AI
-        if (enemy.position.x < player.position.x - 10) enemy.moveRight();
-        else if (enemy.position.x > player.position.x + 10) enemy.moveLeft();
+        if (enemy.physics.position.x < player.physics.position.x - 10) enemy.moveRight();
+        else if (enemy.physics.position.x > player.physics.position.x + 10) enemy.moveLeft();
         
         if (GetRandomValue(0, 100) < 2) enemy.jump();
         
@@ -74,15 +74,15 @@ int legacy_main() {  // Renamed to avoid duplicate main function
         else if (specialChoice < 4) enemy.specialDownAttack();
         
         // Check if either character is starting death animation
-        bool playerStartingDeath = !player.isDying && player.position.y > SCREEN_HEIGHT + 90;
-        bool enemyStartingDeath = !enemy.isDying && enemy.position.y > SCREEN_HEIGHT + 90;
+        bool playerStartingDeath = !player.stateManager.isDying && player.physics.position.y > SCREEN_HEIGHT + 90;
+        bool enemyStartingDeath = !enemy.stateManager.isDying && enemy.physics.position.y > SCREEN_HEIGHT + 90;
         
         // Update characters
         player.update(platforms);
         enemy.update(platforms);
         
         // Check for newly started death animations
-        if (!playerDiedLastFrame && player.isDying) {
+        if (!playerDiedLastFrame && player.stateManager.isDying) {
             // Create blast particles for player death
             std::vector<Particle> deathParticles = createBlastParticles(player.deathPosition, 40, player.color);
             particles.insert(particles.end(), deathParticles.begin(), deathParticles.end());
@@ -91,37 +91,37 @@ int legacy_main() {  // Renamed to avoid duplicate main function
             // In a real game, you would add sound here
         }
         
-        if (!enemyDiedLastFrame && enemy.isDying) {
+        if (!enemyDiedLastFrame && enemy.stateManager.isDying) {
             // Create blast particles for enemy death
             std::vector<Particle> deathParticles = createBlastParticles(enemy.deathPosition, 40, enemy.color);
             particles.insert(particles.end(), deathParticles.begin(), deathParticles.end());
         }
         
         // Update death tracking
-        playerDiedLastFrame = player.isDying;
-        enemyDiedLastFrame = enemy.isDying;
+        playerDiedLastFrame = player.stateManager.isDying;
+        enemyDiedLastFrame = enemy.stateManager.isDying;
         
         // Check for hits
         if (player.checkHit(enemy)) {
             // Create hit particles
-            std::vector<Particle> newParticles = createSplashParticles(enemy.position, 20);
+            std::vector<Particle> newParticles = createSplashParticles(enemy.physics.position, 20);
             particles.insert(particles.end(), newParticles.begin(), newParticles.end());
             
             // If damage is very high, create more particles
             if (enemy.damagePercent > 100) {
-                std::vector<Particle> extraParticles = createSplashParticles(enemy.position, enemy.damagePercent / 20);
+                std::vector<Particle> extraParticles = createSplashParticles(enemy.physics.position, enemy.damagePercent / 20);
                 particles.insert(particles.end(), extraParticles.begin(), extraParticles.end());
             }
         }
         
         if (enemy.checkHit(player)) {
             // Create hit particles
-            std::vector<Particle> newParticles = createSplashParticles(player.position, 20);
+            std::vector<Particle> newParticles = createSplashParticles(player.physics.position, 20);
             particles.insert(particles.end(), newParticles.begin(), newParticles.end());
             
             // If damage is very high, create more particles
             if (player.damagePercent > 100) {
-                std::vector<Particle> extraParticles = createSplashParticles(player.position, player.damagePercent / 20);
+                std::vector<Particle> extraParticles = createSplashParticles(player.physics.position, player.damagePercent / 20);
                 particles.insert(particles.end(), extraParticles.begin(), extraParticles.end());
             }
         }
@@ -160,21 +160,21 @@ int legacy_main() {  // Renamed to avoid duplicate main function
         }
         
         // Draw characters (draw dying characters first so they appear behind)
-        if (player.isDying) player.draw();
-        if (enemy.isDying) enemy.draw();
+        if (player.stateManager.isDying) player.draw();
+        if (enemy.stateManager.isDying) enemy.draw();
         
         // Draw active characters on top
-        if (!player.isDying) player.draw();
-        if (!enemy.isDying) enemy.draw();
+        if (!player.stateManager.isDying) player.draw();
+        if (!enemy.stateManager.isDying) enemy.draw();
         
         // Draw UI
         DrawText("TOILET BRAWL", 20, 20, 30, DARKBLUE);
         
         // Show blast-off message when a character dies
-        if (player.isDying) {
+        if (player.stateManager.isDying) {
             DrawText("PLAYER BLASTED OFF!", SCREEN_WIDTH/2 - 150, 200, 30, RED);
         }
-        if (enemy.isDying) {
+        if (enemy.stateManager.isDying) {
             DrawText("ENEMY BLASTED OFF!", SCREEN_WIDTH/2 - 150, 250, 30, RED);
         }
         
