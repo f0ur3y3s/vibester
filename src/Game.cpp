@@ -64,32 +64,36 @@ void InitGame() {
     // Load font
     gameFont = GetFontDefault();
 
-    // Create platforms (battlefield style)
-    // Main platform
+    // Create platforms with appropriate types
+    // Main/bottom platform (SOLID - has full collision)
     platforms.push_back(Platform(
         SCREEN_WIDTH/2 - 300, SCREEN_HEIGHT - 100,
         600, 50,
-        DARKGRAY
+        DARKGRAY,
+        SOLID  // Main platform is solid
     ));
 
-    // Side platforms
+    // Side platforms (PASSTHROUGH - only collide from top)
     platforms.push_back(Platform(
         SCREEN_WIDTH/2 - 250, SCREEN_HEIGHT - 250,
         150, 20,
-        GRAY
+        GRAY,
+        PASSTHROUGH  // Side platforms are passthrough
     ));
 
     platforms.push_back(Platform(
         SCREEN_WIDTH/2 + 100, SCREEN_HEIGHT - 250,
         150, 20,
-        GRAY
+        GRAY,
+        PASSTHROUGH  // Side platforms are passthrough
     ));
 
-    // Top platform
+    // Top platform (PASSTHROUGH)
     platforms.push_back(Platform(
         SCREEN_WIDTH/2 - 75, SCREEN_HEIGHT - 400,
         150, 20,
-        GRAY
+        GRAY,
+        PASSTHROUGH  // Top platform is passthrough
     ));
 
     // Create spawn points
@@ -137,6 +141,58 @@ void InitGame() {
     gameState.settings.itemFrequency = 0.5f;
     gameState.settings.stageHazards = true;
     gameState.settings.finalSmash = true;
+}
+
+void CreateTestPlatforms() {
+    // Clear existing platforms
+    platforms.clear();
+
+    // Create a test stage with different platform types
+
+    // Main solid platform at the bottom
+    platforms.push_back(Platform(
+        SCREEN_WIDTH/2 - 400, SCREEN_HEIGHT - 80,
+        800, 50,
+        DARKGRAY,
+        SOLID
+    ));
+
+    // Add passthrough platforms
+    platforms.push_back(Platform(
+        100, SCREEN_HEIGHT - 200,
+        200, 20,
+        GRAY,
+        PASSTHROUGH
+    ));
+
+    platforms.push_back(Platform(
+        SCREEN_WIDTH - 300, SCREEN_HEIGHT - 200,
+        200, 20,
+        GRAY,
+        PASSTHROUGH
+    ));
+
+    platforms.push_back(Platform(
+        SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT - 300,
+        200, 20,
+        GRAY,
+        PASSTHROUGH
+    ));
+
+    // Add a moving platform example (if needed in the future)
+    /*
+    platforms.push_back(Platform(
+        SCREEN_WIDTH/2 - 75, SCREEN_HEIGHT - 400,
+        150, 20,
+        SKYBLUE,
+        PASSTHROUGH
+    ));
+    */
+
+    // Create updated spawn points
+    spawnPoints.clear();
+    spawnPoints.push_back({SCREEN_WIDTH/2 - 200, SCREEN_HEIGHT - 200});
+    spawnPoints.push_back({SCREEN_WIDTH/2 + 200, SCREEN_HEIGHT - 200});
 }
 
 void UpdateGame() {
@@ -228,7 +284,17 @@ void UpdateGame() {
                 if (IsKeyDown(KEY_A)) players[0]->moveLeft();
                 if (IsKeyDown(KEY_D)) players[0]->moveRight();
                 if (IsKeyPressed(KEY_W)) players[0]->jump();
-                if (IsKeyDown(KEY_S)) players[0]->fastFall();
+
+                // Fast fall / platform drop-through
+                if (IsKeyDown(KEY_S)) {
+                    if (players[0]->state == Character::IDLE || players[0]->state == Character::RUNNING) {
+                        // On ground, attempt to drop through platform
+                        players[0]->dropThroughPlatform();
+                    } else if (players[0]->state == Character::FALLING) {
+                        // In air, fast fall
+                        players[0]->fastFall();
+                    }
+                }
 
                 // Attacks
                 if (IsKeyPressed(KEY_J)) {

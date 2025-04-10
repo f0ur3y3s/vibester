@@ -175,6 +175,7 @@ public:
     void moveLeft();
     void moveRight();
     void fastFall();
+    void dropThroughPlatform();
 
     // Defense methods
     void shield();

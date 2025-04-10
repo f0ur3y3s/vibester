@@ -127,7 +127,7 @@ void Character::update(std::vector<Platform>& platforms) {
     // Variables used across all states
     bool onGround = false;
 
-    // Variables for collision detection (defined outside switch to avoid redeclaration errors)
+    // Variables for collision detection
     const int collisionSteps = 4; // Number of sub-steps for collision checking
     float stepX = 0;
     float stepY = 0;
@@ -147,7 +147,6 @@ void Character::update(std::vector<Platform>& platforms) {
             }
 
             // Setup sub-frame precision for collision detection
-            // This prevents phasing through platforms at high speeds
             stepX = velocity.x / collisionSteps;
             stepY = velocity.y / collisionSteps;
 
@@ -160,41 +159,66 @@ void Character::update(std::vector<Platform>& platforms) {
                 for (auto& platform : platforms) {
                     Rectangle playerRect = getRect();
                     if (CheckCollisionRecs(playerRect, platform.rect)) {
-                        // Top collision - only check if moving downward
-                        if (stepY > 0) {
-                            if (playerRect.y + playerRect.height > platform.rect.y &&
-                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
-                                position.y = platform.rect.y - height / 2;
-                                velocity.y = 0;
-                                onGround = true;
+                        // Handle collision based on platform type
+                        if (platform.type == SOLID) {
+                            // SOLID platforms have collision from all sides
 
-                                // Reset states that need ground
-                                if (isJumping) isJumping = false;
-                                hasDoubleJump = true;
-                                isHitstun = false;
-                                break; // Found a top collision, stop checking other platforms
+                            // Top collision - only check if moving downward
+                            if (stepY > 0) {
+                                if (playerRect.y + playerRect.height > platform.rect.y &&
+                                    playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
+                                    position.y = platform.rect.y - height / 2;
+                                    velocity.y = 0;
+                                    onGround = true;
+
+                                    // Reset states that need ground
+                                    if (isJumping) isJumping = false;
+                                    hasDoubleJump = true;
+                                    isHitstun = false;
+                                    break; // Found a top collision, stop checking other platforms
+                                }
+                            }
+
+                            // Side collisions - prevent movement into platforms
+                            // Only apply side collision if player's feet are below platform top
+                            // AND player's top is not above platform bottom (to allow movement under platforms)
+                            if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                                playerRect.y < platform.rect.y + platform.rect.height) {
+                                // Right side collision - player moving right into platform left edge
+                                if (stepX > 0 &&
+                                    playerRect.x + playerRect.width > platform.rect.x &&
+                                    playerRect.x < platform.rect.x) {
+                                    position.x = platform.rect.x - width / 2;
+                                    velocity.x = 0;
+                                }
+                                // Left side collision - player moving left into platform right edge
+                                else if (stepX < 0 &&
+                                         playerRect.x < platform.rect.x + platform.rect.width &&
+                                         playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
+                                    position.x = platform.rect.x + platform.rect.width + width / 2;
+                                    velocity.x = 0;
+                                }
                             }
                         }
+                        else if (platform.type == PASSTHROUGH) {
+                            // PASSTHROUGH platforms only have collision from above
 
-                        // Side collisions - prevent movement into platforms
-                        // Only apply side collision if player's feet are below platform top
-                        // AND player's top is not above platform bottom (to allow movement under platforms)
-                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
-                            playerRect.y < platform.rect.y + platform.rect.height) {
-                            // Right side collision - player moving right into platform left edge
-                            if (stepX > 0 &&
-                                playerRect.x + playerRect.width > platform.rect.x &&
-                                playerRect.x < platform.rect.x) {
-                                position.x = platform.rect.x - width / 2;
-                                velocity.x = 0;
+                            // Top collision - only check if moving downward
+                            if (stepY > 0) {
+                                // Previous position was above the platform
+                                if (playerRect.y + playerRect.height - stepY <= platform.rect.y) {
+                                    position.y = platform.rect.y - height / 2;
+                                    velocity.y = 0;
+                                    onGround = true;
+
+                                    // Reset states that need ground
+                                    if (isJumping) isJumping = false;
+                                    hasDoubleJump = true;
+                                    isHitstun = false;
+                                    break; // Found a top collision, stop checking other platforms
+                                }
                             }
-                            // Left side collision - player moving left into platform right edge
-                            else if (stepX < 0 &&
-                                     playerRect.x < platform.rect.x + platform.rect.width &&
-                                     playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
-                                position.x = platform.rect.x + platform.rect.width + width / 2;
-                                velocity.x = 0;
-                            }
+                            // No side or bottom collisions for passthrough platforms
                         }
                     }
                 }
@@ -251,6 +275,7 @@ void Character::update(std::vector<Platform>& platforms) {
             }
             break;
 
+        // Similar changes for other states...
         case ATTACKING:
             // Apply gravity during attacks unless it's a specific air attack type
             velocity.y += GRAVITY;
@@ -271,40 +296,62 @@ void Character::update(std::vector<Platform>& platforms) {
                 for (auto& platform : platforms) {
                     Rectangle playerRect = getRect();
                     if (CheckCollisionRecs(playerRect, platform.rect)) {
-                        // Top collision
-                        if (stepY > 0) {
-                            if (playerRect.y + playerRect.height > platform.rect.y &&
-                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
-                                position.y = platform.rect.y - height / 2;
-                                velocity.y = 0;
-                                onGround = true;
+                        if (platform.type == SOLID) {
+                            // Full collision for solid platforms
 
-                                // Ground attacks continue
-                                // Air attacks may cancel on landing
-                                if (currentAttack >= NEUTRAL_AIR && currentAttack <= DOWN_AIR) {
-                                    resetAttackState();
-                                    changeState(IDLE);
+                            // Top collision
+                            if (stepY > 0) {
+                                if (playerRect.y + playerRect.height > platform.rect.y &&
+                                    playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
+                                    position.y = platform.rect.y - height / 2;
+                                    velocity.y = 0;
+                                    onGround = true;
+
+                                    // Ground attacks continue
+                                    // Air attacks may cancel on landing
+                                    if (currentAttack >= NEUTRAL_AIR && currentAttack <= DOWN_AIR) {
+                                        resetAttackState();
+                                        changeState(IDLE);
+                                    }
+                                    break; // Found a top collision, stop checking other platforms
                                 }
-                                break; // Found a top collision, stop checking other platforms
+                            }
+
+                            // Side collisions
+                            if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                                playerRect.y < platform.rect.y + platform.rect.height) {
+                                // Right side collision
+                                if (stepX > 0 &&
+                                    playerRect.x + playerRect.width > platform.rect.x &&
+                                    playerRect.x < platform.rect.x) {
+                                    position.x = platform.rect.x - width / 2;
+                                    velocity.x = 0;
+                                }
+                                // Left side collision
+                                else if (stepX < 0 &&
+                                         playerRect.x < platform.rect.x + platform.rect.width &&
+                                         playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
+                                    position.x = platform.rect.x + platform.rect.width + width / 2;
+                                    velocity.x = 0;
+                                }
                             }
                         }
+                        else if (platform.type == PASSTHROUGH) {
+                            // Only top collision for passthrough platforms
+                            if (stepY > 0) {
+                                // Check if coming from above
+                                if (playerRect.y + playerRect.height - stepY <= platform.rect.y) {
+                                    position.y = platform.rect.y - height / 2;
+                                    velocity.y = 0;
+                                    onGround = true;
 
-                        // Side collisions - prevent movement into platforms
-                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
-                            playerRect.y < platform.rect.y + platform.rect.height) {
-                            // Right side collision
-                            if (stepX > 0 &&
-                                playerRect.x + playerRect.width > platform.rect.x &&
-                                playerRect.x < platform.rect.x) {
-                                position.x = platform.rect.x - width / 2;
-                                velocity.x = 0;
-                            }
-                            // Left side collision
-                            else if (stepX < 0 &&
-                                     playerRect.x < platform.rect.x + platform.rect.width &&
-                                     playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
-                                position.x = platform.rect.x + platform.rect.width + width / 2;
-                                velocity.x = 0;
+                                    // Check if air attack should cancel on landing
+                                    if (currentAttack >= NEUTRAL_AIR && currentAttack <= DOWN_AIR) {
+                                        resetAttackState();
+                                        changeState(IDLE);
+                                    }
+                                    break;
+                                }
                             }
                         }
                     }
@@ -334,6 +381,7 @@ void Character::update(std::vector<Platform>& platforms) {
             }
             break;
 
+        // Remaining states would be modified similarly...
         case SHIELDING:
             // Slowly regenerate shield
             shieldHealth = std::min(shieldHealth + SHIELD_REGEN_RATE, MAX_SHIELD_HEALTH);
@@ -363,13 +411,12 @@ void Character::update(std::vector<Platform>& platforms) {
             }
             break;
 
-
         case HITSTUN:
             // Apply gravity
             velocity.y += GRAVITY;
 
+            // Same collision logic as above
             // Setup sub-frame precision for collision detection
-            // This prevents phasing through platforms at high speeds
             stepX = velocity.x / collisionSteps;
             stepY = velocity.y / collisionSteps;
 
@@ -378,36 +425,51 @@ void Character::update(std::vector<Platform>& platforms) {
                 position.x += stepX;
                 position.y += stepY;
 
-                // Platform collision on each sub-step
+                // Platform collision handling for hitstun state
                 for (auto& platform : platforms) {
                     Rectangle playerRect = getRect();
                     if (CheckCollisionRecs(playerRect, platform.rect)) {
-                        // Top collision
-                        if (stepY > 0) {
-                            if (playerRect.y + playerRect.height > platform.rect.y &&
-                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
-                                position.y = platform.rect.y - height / 2;
-                                velocity.y = 0;
-                                break; // Found a top collision, stop checking other platforms
+                        if (platform.type == SOLID) {
+                            // Full collisions for solid platforms
+
+                            // Top collision
+                            if (stepY > 0) {
+                                if (playerRect.y + playerRect.height > platform.rect.y &&
+                                    playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
+                                    position.y = platform.rect.y - height / 2;
+                                    velocity.y = 0;
+                                    break; // Found a top collision, stop checking other platforms
+                                }
+                            }
+
+                            // Side collisions
+                            if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                                playerRect.y < platform.rect.y + platform.rect.height) {
+                                // Right side collision
+                                if (stepX > 0 &&
+                                    playerRect.x + playerRect.width > platform.rect.x &&
+                                    playerRect.x < platform.rect.x) {
+                                    position.x = platform.rect.x - width / 2;
+                                    velocity.x = 0;
+                                }
+                                // Left side collision
+                                else if (stepX < 0 &&
+                                         playerRect.x < platform.rect.x + platform.rect.width &&
+                                         playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
+                                    position.x = platform.rect.x + platform.rect.width + width / 2;
+                                    velocity.x = 0;
+                                }
                             }
                         }
-
-                        // Side collisions
-                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
-                            playerRect.y < platform.rect.y + platform.rect.height) {
-                            // Right side collision
-                            if (stepX > 0 &&
-                                playerRect.x + playerRect.width > platform.rect.x &&
-                                playerRect.x < platform.rect.x) {
-                                position.x = platform.rect.x - width / 2;
-                                velocity.x = 0;
-                            }
-                            // Left side collision
-                            else if (stepX < 0 &&
-                                     playerRect.x < platform.rect.x + platform.rect.width &&
-                                     playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
-                                position.x = platform.rect.x + platform.rect.width + width / 2;
-                                velocity.x = 0;
+                        else if (platform.type == PASSTHROUGH) {
+                            // Only top collision for passthrough platforms
+                            if (stepY > 0) {
+                                // Check if coming from above
+                                if (playerRect.y + playerRect.height - stepY <= platform.rect.y) {
+                                    position.y = platform.rect.y - height / 2;
+                                    velocity.y = 0;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -443,9 +505,6 @@ void Character::update(std::vector<Platform>& platforms) {
             i--;
         }
     }
-
-    // Attack hitbox collision needs to be handled externally now (in Game.cpp)
-    // since we removed the characters vector parameter from update
 }
 
 void Character::updateAttackPositions() {
@@ -1443,4 +1502,18 @@ bool Character::isOutOfBounds() {
            position.x > BLAST_ZONE_RIGHT ||
            position.y < BLAST_ZONE_TOP ||
            position.y > BLAST_ZONE_BOTTOM;
+}
+
+void Character::dropThroughPlatform() {
+    // Check if character is standing on a platform
+    if (state == IDLE || state == RUNNING) {
+        // Move character down slightly to avoid immediate re-collision
+        position.y += 5;
+
+        // Apply a small downward velocity to ensure continued falling
+        velocity.y = 1.0f;
+
+        // Change state to falling
+        changeState(FALLING);
+    }
 }

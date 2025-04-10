@@ -8,7 +8,7 @@ const int SCREEN_HEIGHT = 720;
 // Physics constants
 const float GRAVITY = 0.5f;
 const float FAST_FALL_GRAVITY = 0.8f;
-const float JUMP_FORCE = -12.0f;
+const float JUMP_FORCE = -14.0f;
 const float DOUBLE_JUMP_FORCE = -10.0f;
 
 // Smash mechanic constants
