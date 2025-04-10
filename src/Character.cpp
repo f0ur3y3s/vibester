@@ -126,13 +126,13 @@ void Character::update(std::vector<Platform>& platforms) {
 
     // Variables used across all states
     bool onGround = false;
-    
+
     // Variables for collision detection (defined outside switch to avoid redeclaration errors)
     const int collisionSteps = 4; // Number of sub-steps for collision checking
     float stepX = 0;
     float stepY = 0;
     float modifiedVelocityX = 0;
-    
+
     // Process current state
     switch (state) {
         case IDLE:
@@ -150,12 +150,12 @@ void Character::update(std::vector<Platform>& platforms) {
             // This prevents phasing through platforms at high speeds
             stepX = velocity.x / collisionSteps;
             stepY = velocity.y / collisionSteps;
-            
+
             for (int step = 0; step < collisionSteps; step++) {
                 // Apply partial movement
                 position.x += stepX;
                 position.y += stepY;
-                
+
                 // Platform collision on each sub-step
                 for (auto& platform : platforms) {
                     Rectangle playerRect = getRect();
@@ -167,7 +167,7 @@ void Character::update(std::vector<Platform>& platforms) {
                                 position.y = platform.rect.y - height / 2;
                                 velocity.y = 0;
                                 onGround = true;
-                                
+
                                 // Reset states that need ground
                                 if (isJumping) isJumping = false;
                                 hasDoubleJump = true;
@@ -175,16 +175,26 @@ void Character::update(std::vector<Platform>& platforms) {
                                 break; // Found a top collision, stop checking other platforms
                             }
                         }
-                        
+
                         // Side collisions - prevent movement into platforms
-                        if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
-                            playerRect.y + playerRect.height > platform.rect.y + 5) {
-                            position.x = platform.rect.x - width / 2;
-                            velocity.x = 0;
-                        } else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
-                                   playerRect.y + playerRect.height > platform.rect.y + 5) {
-                            position.x = platform.rect.x + platform.rect.width + width / 2;
-                            velocity.x = 0;
+                        // Only apply side collision if player's feet are below platform top
+                        // AND player's top is not above platform bottom (to allow movement under platforms)
+                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                            playerRect.y < platform.rect.y + platform.rect.height) {
+                            // Right side collision - player moving right into platform left edge
+                            if (stepX > 0 &&
+                                playerRect.x + playerRect.width > platform.rect.x &&
+                                playerRect.x < platform.rect.x) {
+                                position.x = platform.rect.x - width / 2;
+                                velocity.x = 0;
+                            }
+                            // Left side collision - player moving left into platform right edge
+                            else if (stepX < 0 &&
+                                     playerRect.x < platform.rect.x + platform.rect.width &&
+                                     playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
+                                position.x = platform.rect.x + platform.rect.width + width / 2;
+                                velocity.x = 0;
+                            }
                         }
                     }
                 }
@@ -203,7 +213,6 @@ void Character::update(std::vector<Platform>& platforms) {
                 } else {
                     changeState(FALLING);
                 }
-
             }
 
             // Apply friction
@@ -248,16 +257,16 @@ void Character::update(std::vector<Platform>& platforms) {
 
             // Limited horizontal movement during attacks
             modifiedVelocityX = velocity.x * 0.5f;
-            
+
             // Setup sub-frame precision for collision detection
             stepX = modifiedVelocityX / collisionSteps;
             stepY = velocity.y / collisionSteps;
-            
+
             for (int step = 0; step < collisionSteps; step++) {
                 // Apply partial movement
                 position.x += stepX;
                 position.y += stepY;
-                
+
                 // Platform collision on each sub-step
                 for (auto& platform : platforms) {
                     Rectangle playerRect = getRect();
@@ -268,7 +277,8 @@ void Character::update(std::vector<Platform>& platforms) {
                                 playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
                                 position.y = platform.rect.y - height / 2;
                                 velocity.y = 0;
-                                
+                                onGround = true;
+
                                 // Ground attacks continue
                                 // Air attacks may cancel on landing
                                 if (currentAttack >= NEUTRAL_AIR && currentAttack <= DOWN_AIR) {
@@ -278,36 +288,48 @@ void Character::update(std::vector<Platform>& platforms) {
                                 break; // Found a top collision, stop checking other platforms
                             }
                         }
-                        
+
                         // Side collisions - prevent movement into platforms
-                        if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
-                            playerRect.y + playerRect.height > platform.rect.y + 5) {
-                            position.x = platform.rect.x - width / 2;
-                            velocity.x = 0;
-                        } else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
-                                  playerRect.y + playerRect.height > platform.rect.y + 5) {
-                            position.x = platform.rect.x + platform.rect.width + width / 2;
-                            velocity.x = 0;
+                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                            playerRect.y < platform.rect.y + platform.rect.height) {
+                            // Right side collision
+                            if (stepX > 0 &&
+                                playerRect.x + playerRect.width > platform.rect.x &&
+                                playerRect.x < platform.rect.x) {
+                                position.x = platform.rect.x - width / 2;
+                                velocity.x = 0;
+                            }
+                            // Left side collision
+                            else if (stepX < 0 &&
+                                     playerRect.x < platform.rect.x + platform.rect.width &&
+                                     playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
+                                position.x = platform.rect.x + platform.rect.width + width / 2;
+                                velocity.x = 0;
+                            }
                         }
                     }
                 }
             }
 
-            // Update attack positions
+            // Update attack positions and increment attack frame
             updateAttackPositions();
             attackFrame++;
 
-            // End attack when duration is over
+            // End attack when duration is over and transition to appropriate state
             if (attackFrame >= attackDuration) {
                 resetAttackState();
 
-                // Return to appropriate state
-                if (velocity.y < 0) {
+                // Return to appropriate state based on position and velocity
+                if (onGround) {
+                    if (fabs(velocity.x) > 0.5f) {
+                        changeState(RUNNING);
+                    } else {
+                        changeState(IDLE);
+                    }
+                } else if (velocity.y < 0) {
                     changeState(JUMPING);
-                } else if (velocity.y > 0) {
-                    changeState(FALLING);
                 } else {
-                    changeState(IDLE);
+                    changeState(FALLING);
                 }
             }
             break;
@@ -350,12 +372,12 @@ void Character::update(std::vector<Platform>& platforms) {
             // This prevents phasing through platforms at high speeds
             stepX = velocity.x / collisionSteps;
             stepY = velocity.y / collisionSteps;
-            
+
             for (int step = 0; step < collisionSteps; step++) {
                 // Apply partial movement
                 position.x += stepX;
                 position.y += stepY;
-                
+
                 // Platform collision on each sub-step
                 for (auto& platform : platforms) {
                     Rectangle playerRect = getRect();
@@ -369,16 +391,24 @@ void Character::update(std::vector<Platform>& platforms) {
                                 break; // Found a top collision, stop checking other platforms
                             }
                         }
-                        
+
                         // Side collisions
-                        if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
-                            playerRect.y + playerRect.height > platform.rect.y + 5) {
-                            position.x = platform.rect.x - width / 2;
-                            velocity.x = 0;
-                        } else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
-                                   playerRect.y + playerRect.height > platform.rect.y + 5) {
-                            position.x = platform.rect.x + platform.rect.width + width / 2;
-                            velocity.x = 0;
+                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                            playerRect.y < platform.rect.y + platform.rect.height) {
+                            // Right side collision
+                            if (stepX > 0 &&
+                                playerRect.x + playerRect.width > platform.rect.x &&
+                                playerRect.x < platform.rect.x) {
+                                position.x = platform.rect.x - width / 2;
+                                velocity.x = 0;
+                            }
+                            // Left side collision
+                            else if (stepX < 0 &&
+                                     playerRect.x < platform.rect.x + platform.rect.width &&
+                                     playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
+                                position.x = platform.rect.x + platform.rect.width + width / 2;
+                                velocity.x = 0;
+                            }
                         }
                     }
                 }
@@ -445,8 +475,9 @@ void Character::changeState(CharacterState newState) {
         return;
     }
 
-    // Don't change state if currently attacking, unless hit or dying
-    if (state == ATTACKING && newState != HITSTUN && newState != DYING && attackFrame < attackDuration) {
+    // Don't change state if currently attacking, unless hit or dying or attack is finished
+    if (state == ATTACKING && newState != HITSTUN && newState != DYING &&
+        attackFrame < attackDuration && isAttacking) {
         return;
     }
 
@@ -1395,7 +1426,7 @@ void Character::applyKnockback(float damage, float baseKnockback, float knockbac
 
     // Change state
     changeState(HITSTUN);
-    
+
     // Cap maximum knockback to prevent phasing through floors
     const float MAX_KNOCKBACK_Y = 20.0f;
     if (velocity.y > MAX_KNOCKBACK_Y) velocity.y = MAX_KNOCKBACK_Y;

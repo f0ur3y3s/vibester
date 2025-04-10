@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 project(test_toilet CXX)
 set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add OpenGL explicitly
 find_package(OpenGL REQUIRED)
