@@ -16,7 +16,8 @@
 class Character;
 
 // Character class - enhanced for Smash Bros style
-class Character {
+class Character
+{
 public:
     // Basic properties
     float width;
@@ -30,27 +31,27 @@ public:
     CharacterStateManager stateManager;
 
     // Smash-style properties
-    float damagePercent;    // Damage as percentage (0-999%)
-    int stocks;             // Lives remaining
-    
+    float damagePercent; // Damage as percentage (0-999%)
+    int stocks; // Lives remaining
+
     // Visual elements
-    int currentFrame;       // Animation tracking
+    int currentFrame; // Animation tracking
     int framesCounter;
     int framesSpeed;
-    
+
     // Death animation properties
     float deathRotation;
     float deathScale;
     Vector2 deathVelocity;
     Vector2 deathPosition;
-    
+
     // Grab reference
     Character* grabbedCharacter;
-    
+
     // Visual effects
     std::vector<HitEffect> hitEffects;
     std::vector<AttackBox> attacks;
-    
+
     // Explosion state
     std::vector<Particle> explosionParticles;
 

@@ -5,7 +5,8 @@
 #include <string>
 
 // Game constants moved to a central configuration file
-namespace GameConfig {
+namespace GameConfig
+{
     // Screen dimensions
     constexpr int SCREEN_WIDTH = 1280;
     constexpr int SCREEN_HEIGHT = 720;
@@ -31,7 +32,7 @@ namespace GameConfig {
     constexpr float SHIELD_DAMAGE_MULTIPLIER = 0.7f;
     constexpr float DAMAGE_SCALING = 0.05f;
     constexpr float HITSTUN_MULTIPLIER = 0.5f;
-    
+
     // Timing constants
     constexpr int SHIELD_BREAK_STUN = 180;
     constexpr int SHIELD_STUN_FRAMES = 5;
@@ -44,13 +45,14 @@ namespace GameConfig {
 }
 
 // Character configuration for different character types
-struct CharacterConfig {
+struct CharacterConfig
+{
     float width;
     float height;
     float speed;
     Color color;
     std::string name;
-    
+
     // Customizable parameters
     float jumpForce;
     float doubleJumpForce;
@@ -59,22 +61,23 @@ struct CharacterConfig {
     int specialSideCooldown;
     int specialUpCooldown;
     int specialDownCooldown;
-    
+
     // Default configuration
-    static CharacterConfig Default() {
+    static CharacterConfig Default()
+    {
         return {
-            50.0f,                              // width
-            80.0f,                              // height
-            5.0f,                               // speed
-            BLUE,                               // color
-            "Character",                        // name
-            GameConfig::JUMP_FORCE,             // jumpForce
-            GameConfig::DOUBLE_JUMP_FORCE,      // doubleJumpForce
-            1.0f,                               // weight
-            120,                                // specialNeutralCooldown
-            90,                                 // specialSideCooldown
-            60,                                 // specialUpCooldown
-            120                                 // specialDownCooldown
+            50.0f, // width
+            80.0f, // height
+            5.0f, // speed
+            BLUE, // color
+            "Character", // name
+            GameConfig::JUMP_FORCE, // jumpForce
+            GameConfig::DOUBLE_JUMP_FORCE, // doubleJumpForce
+            1.0f, // weight
+            120, // specialNeutralCooldown
+            90, // specialSideCooldown
+            60, // specialUpCooldown
+            120 // specialDownCooldown
         };
     }
 };
