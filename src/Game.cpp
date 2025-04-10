@@ -5,9 +5,10 @@
 #include "ParticleSystem.h"
 #include "GameConfig.h"
 #include "Item.h"
-#include "GameState.h"
-#include "EnhancedAIController.h" // Updated include for the new AI architecture
-#include "StateManager.h" // Include state definitions
+#include "NetworkedGameState.h" // Use NetworkedGameState for both networked and local play
+#include "NetworkUI.h"          // Network UI components
+#include "EnhancedAIController.h" // Enhanced AI controller for PvE
+#include "StateManager.h"
 #include <vector>
 #include <string>
 #include <iostream>
@@ -32,7 +33,9 @@ using CharacterState::HITSTUN;
 using CharacterState::DYING;
 
 // Global game variables
-GameState gameState;
+NetworkedGameState gameState;    // Use NetworkedGameState for both modes
+NetworkUI* networkUI = nullptr;  // Network UI
+bool showNetworkMenu = false;    // Flag to show/hide network menu
 std::vector<Character*> players;
 std::vector<Platform> platforms;
 std::vector<Vector2> spawnPoints;
@@ -40,7 +43,7 @@ std::vector<Particle> particles;
 Font gameFont;
 bool debugMode = false;
 
-// Create an instance of the enhanced AI controller
+// Create an instance of the enhanced AI controller for PvE
 std::unique_ptr<EnhancedAIController> enhancedAI;
 float difficultyLevel = 0.8f; // Default to challenging (0.0 to 1.0)
 
@@ -48,7 +51,7 @@ float difficultyLevel = 0.8f; // Default to challenging (0.0 to 1.0)
 int main()
 {
     // Initialize window
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Super Smash Clone - Advanced AI Mode");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Super Smash Clone - Ultimate Edition");
     SetTargetFPS(60);
 
     // Initialize game
@@ -117,7 +120,7 @@ void InitGame()
     spawnPoints.push_back({SCREEN_WIDTH / 2, SCREEN_HEIGHT - 200});
     spawnPoints.push_back({SCREEN_WIDTH / 2, SCREEN_HEIGHT - 300});
 
-    // Create player and enemy
+    // Create player and enemy/opponent
     Character* player1 = new Character(
         spawnPoints[0].x, spawnPoints[0].y,
         50, 80,
@@ -126,26 +129,29 @@ void InitGame()
         "Player 1"
     );
 
-    Character* enemy = new Character(
+    Character* player2 = new Character(
         spawnPoints[1].x, spawnPoints[1].y,
         50, 80,
         5.0f,
         BLUE,
-        "Enemy"
+        "Player 2"
     );
 
     players.push_back(player1);
-    players.push_back(enemy);
+    players.push_back(player2);
 
-    // Initialize the AI controller
+    // Initialize the AI controller for PvE
     enhancedAI = std::make_unique<EnhancedAIController>();
     enhancedAI->SetDifficulty(difficultyLevel);
 
-    // Initialize game state
-    gameState = GameState();
+    // Initialize networked game state (works for both modes)
+    gameState = NetworkedGameState();
     gameState.players = players;
     gameState.platforms = platforms;
     gameState.spawnPoints = spawnPoints;
+
+    // Create the network UI
+    networkUI = new NetworkUI(&gameState);
 
     // Start in title screen
     gameState.currentState = GameState::TITLE_SCREEN;
@@ -157,10 +163,27 @@ void InitGame()
     gameState.settings.itemFrequency = 0.5f;
     gameState.settings.stageHazards = true;
     gameState.settings.finalSmash = true;
+
+    // Initialize NetworkManager
+    NetworkManager::getInstance().initialize();
 }
 
 void UpdateGame()
 {
+    // Check for network menu toggle
+    if (IsKeyPressed(KEY_N)) {
+        showNetworkMenu = !showNetworkMenu;
+    }
+
+    // Update network UI if visible
+    if (showNetworkMenu) {
+        networkUI->update();
+        return; // Skip normal game update when in network menu
+    }
+
+    // Check if we're in networked mode
+    bool isNetworked = gameState.isNetworked();
+
     // Process game state
     switch (gameState.currentState)
     {
@@ -171,7 +194,7 @@ void UpdateGame()
             gameState.changeState(GameState::GAME_START);
         }
 
-    // Difficulty setting with clear indication
+        // Difficulty setting with clear indication
         if (IsKeyPressed(KEY_ONE))
         {
             difficultyLevel = 0.2f; // Easy
@@ -231,244 +254,256 @@ void UpdateGame()
             break;
         }
 
-    // Update debug mode
+        // Update debug mode
         if (IsKeyPressed(KEY_F1))
         {
             debugMode = !debugMode;
         }
 
-    // Update players
-        for (auto& player : players)
-        {
-            player->update(platforms);
+        // For networked mode, use the NetworkedGameState update which handles sync
+        if (isNetworked) {
+            gameState.update();
         }
+        else {
+            // Normal update for local play
 
-    // Check for character collisions for attacks
-        for (auto& attacker : players)
-        {
-            // Skip players who are dying or exploding
-            if (attacker->stateManager.isDying || attacker->stateManager.isExploding) {
-                continue;
-            }
-            
-            if (attacker->stateManager.isAttacking)
+            // Update players
+            for (auto& player : players)
             {
-                for (auto& defender : players)
+                player->update(platforms);
+            }
+
+            // Check for character collisions for attacks
+            for (auto& attacker : players)
+            {
+                // Skip players who are dying or exploding
+                if (attacker->stateManager.isDying || attacker->stateManager.isExploding) {
+                    continue;
+                }
+
+                if (attacker->stateManager.isAttacking)
                 {
-                    if (attacker != defender)
+                    for (auto& defender : players)
                     {
-                        attacker->checkHit(*defender);
+                        if (attacker != defender)
+                        {
+                            attacker->checkHit(*defender);
+                        }
                     }
                 }
             }
-        }
 
-    // Update particles
-        for (int i = 0; i < particles.size(); i++)
-        {
-            if (!particles[i].update())
+            // Update particles
+            for (int i = 0; i < particles.size(); i++)
             {
-                particles.erase(particles.begin() + i);
-                i--;
-            }
-        }
-
-    // Player 1 controls
-        if (players[0]->stocks > 0 && !players[0]->stateManager.isDying)
-        {
-            // Movement
-            if (IsKeyDown(KEY_A)) players[0]->moveLeft();
-            if (IsKeyDown(KEY_D)) players[0]->moveRight();
-            if (IsKeyPressed(KEY_W)) players[0]->jump();
-
-            // Fast fall / platform drop-through
-            if (IsKeyDown(KEY_S))
-            {
-                if (players[0]->stateManager.state == IDLE || players[0]->stateManager.state == RUNNING)
+                if (!particles[i].update())
                 {
-                    // On ground, attempt to drop through platform
-                    players[0]->dropThroughPlatform();
-                }
-                else if (players[0]->stateManager.state == FALLING)
-                {
-                    // In air, fast fall
-                    players[0]->fastFall();
+                    particles.erase(particles.begin() + i);
+                    i--;
                 }
             }
 
-            // Attacks
-            if (IsKeyPressed(KEY_J))
+            // Player 1 controls (human)
+            if (players[0]->stocks > 0 && !players[0]->stateManager.isDying)
             {
-                // Basic attack - context sensitive
-                if (players[0]->stateManager.state == JUMPING || players[0]->stateManager.state == FALLING)
-                {
-                    players[0]->neutralAir();
-                }
-                else
-                {
-                    players[0]->jab();
-                }
-            }
+                // Movement
+                if (IsKeyDown(KEY_A)) players[0]->moveLeft();
+                if (IsKeyDown(KEY_D)) players[0]->moveRight();
+                if (IsKeyPressed(KEY_W)) players[0]->jump();
 
-            if (IsKeyPressed(KEY_K))
-            {
-                // Special attack - context sensitive
-                if (IsKeyDown(KEY_A))
+                // Fast fall / platform drop-through
+                if (IsKeyDown(KEY_S))
                 {
-                    // Side special left
-                    players[0]->sideSpecial();
+                    if (players[0]->stateManager.state == IDLE || players[0]->stateManager.state == RUNNING)
+                    {
+                        // On ground, attempt to drop through platform
+                        players[0]->dropThroughPlatform();
+                    }
+                    else if (players[0]->stateManager.state == FALLING)
+                    {
+                        // In air, fast fall
+                        players[0]->fastFall();
+                    }
                 }
-                else if (IsKeyDown(KEY_D))
-                {
-                    // Side special right
-                    players[0]->sideSpecial();
-                }
-                else if (IsKeyDown(KEY_W))
-                {
-                    // Up special
-                    players[0]->upSpecial();
-                }
-                else if (IsKeyDown(KEY_S))
-                {
-                    // Down special
-                    players[0]->downSpecial();
-                }
-                else
-                {
-                    // Neutral special
-                    players[0]->neutralSpecial();
-                }
-            }
 
-            // Smash attacks
-            if (IsKeyDown(KEY_L))
-            {
-                if (IsKeyDown(KEY_A))
-                {
-                    // Forward smash left
-                    players[0]->forwardSmash(20.0f);
-                }
-                else if (IsKeyDown(KEY_D))
-                {
-                    // Forward smash right
-                    players[0]->forwardSmash(20.0f);
-                }
-                else if (IsKeyDown(KEY_W))
-                {
-                    // Up smash
-                    players[0]->upSmash(20.0f);
-                }
-                else if (IsKeyDown(KEY_S))
-                {
-                    // Down smash
-                    players[0]->downSmash(20.0f);
-                }
-            }
-
-            // Shield/Dodge
-            if (IsKeyDown(KEY_I))
-            {
-                if (IsKeyPressed(KEY_A))
-                {
-                    players[0]->forwardDodge();
-                }
-                else if (IsKeyPressed(KEY_D))
-                {
-                    players[0]->backDodge();
-                }
-                else if (IsKeyPressed(KEY_S))
-                {
-                    players[0]->spotDodge();
-                }
-                else
-                {
-                    players[0]->shield();
-                }
-            }
-            else if (IsKeyReleased(KEY_I))
-            {
-                players[0]->releaseShield();
-            }
-
-            // Grab
-            if (IsKeyPressed(KEY_U))
-            {
-                players[0]->grab();
-            }
-
-            // Throws (when grabbing)
-            if (players[0]->stateManager.isGrabbing)
-            {
+                // Attacks
                 if (IsKeyPressed(KEY_J))
                 {
-                    players[0]->pummel();
-                }
-                else if (IsKeyPressed(KEY_A))
-                {
-                    players[0]->backThrow();
-                }
-                else if (IsKeyPressed(KEY_D))
-                {
-                    players[0]->forwardThrow();
-                }
-                else if (IsKeyPressed(KEY_W))
-                {
-                    players[0]->upThrow();
-                }
-                else if (IsKeyPressed(KEY_S))
-                {
-                    players[0]->downThrow();
-                }
-            }
-
-            // Aerial controls - more specific aerial attacks
-            if (players[0]->stateManager.state == JUMPING || players[0]->stateManager.state == FALLING)
-            {
-                if (IsKeyPressed(KEY_J))
-                {
-                    if (IsKeyDown(KEY_A))
-                    {
-                        players[0]->backAir();
-                    }
-                    else if (IsKeyDown(KEY_D))
-                    {
-                        players[0]->forwardAir();
-                    }
-                    else if (IsKeyDown(KEY_W))
-                    {
-                        players[0]->upAir();
-                    }
-                    else if (IsKeyDown(KEY_S))
-                    {
-                        players[0]->downAir();
-                    }
-                    else
+                    // Basic attack - context sensitive
+                    if (players[0]->stateManager.state == JUMPING || players[0]->stateManager.state == FALLING)
                     {
                         players[0]->neutralAir();
                     }
+                    else
+                    {
+                        players[0]->jab();
+                    }
                 }
-            }
-        }
 
-    // Run the enhanced AI for the enemy
-        enhancedAI->Update(players, platforms);
-
-    // Check for game end conditions
-        {
-            bool allButOneDead = true;
-            int aliveCount = 0;
-
-            for (auto& player : players)
-            {
-                if (player->stocks > 0)
+                if (IsKeyPressed(KEY_K))
                 {
-                    aliveCount++;
+                    // Special attack - context sensitive
+                    if (IsKeyDown(KEY_A))
+                    {
+                        // Side special left
+                        players[0]->sideSpecial();
+                    }
+                    else if (IsKeyDown(KEY_D))
+                    {
+                        // Side special right
+                        players[0]->sideSpecial();
+                    }
+                    else if (IsKeyDown(KEY_W))
+                    {
+                        // Up special
+                        players[0]->upSpecial();
+                    }
+                    else if (IsKeyDown(KEY_S))
+                    {
+                        // Down special
+                        players[0]->downSpecial();
+                    }
+                    else
+                    {
+                        // Neutral special
+                        players[0]->neutralSpecial();
+                    }
+                }
+
+                // Smash attacks
+                if (IsKeyDown(KEY_L))
+                {
+                    if (IsKeyDown(KEY_A))
+                    {
+                        // Forward smash left
+                        players[0]->forwardSmash(20.0f);
+                    }
+                    else if (IsKeyDown(KEY_D))
+                    {
+                        // Forward smash right
+                        players[0]->forwardSmash(20.0f);
+                    }
+                    else if (IsKeyDown(KEY_W))
+                    {
+                        // Up smash
+                        players[0]->upSmash(20.0f);
+                    }
+                    else if (IsKeyDown(KEY_S))
+                    {
+                        // Down smash
+                        players[0]->downSmash(20.0f);
+                    }
+                }
+
+                // Shield/Dodge
+                if (IsKeyDown(KEY_I))
+                {
+                    if (IsKeyPressed(KEY_A))
+                    {
+                        players[0]->forwardDodge();
+                    }
+                    else if (IsKeyPressed(KEY_D))
+                    {
+                        players[0]->backDodge();
+                    }
+                    else if (IsKeyPressed(KEY_S))
+                    {
+                        players[0]->spotDodge();
+                    }
+                    else
+                    {
+                        players[0]->shield();
+                    }
+                }
+                else if (IsKeyReleased(KEY_I))
+                {
+                    players[0]->releaseShield();
+                }
+
+                // Grab
+                if (IsKeyPressed(KEY_U))
+                {
+                    players[0]->grab();
+                }
+
+                // Throws (when grabbing)
+                if (players[0]->stateManager.isGrabbing)
+                {
+                    if (IsKeyPressed(KEY_J))
+                    {
+                        players[0]->pummel();
+                    }
+                    else if (IsKeyPressed(KEY_A))
+                    {
+                        players[0]->backThrow();
+                    }
+                    else if (IsKeyPressed(KEY_D))
+                    {
+                        players[0]->forwardThrow();
+                    }
+                    else if (IsKeyPressed(KEY_W))
+                    {
+                        players[0]->upThrow();
+                    }
+                    else if (IsKeyPressed(KEY_S))
+                    {
+                        players[0]->downThrow();
+                    }
+                }
+
+                // Aerial controls - more specific aerial attacks
+                if (players[0]->stateManager.state == JUMPING || players[0]->stateManager.state == FALLING)
+                {
+                    if (IsKeyPressed(KEY_J))
+                    {
+                        if (IsKeyDown(KEY_A))
+                        {
+                            players[0]->backAir();
+                        }
+                        else if (IsKeyDown(KEY_D))
+                        {
+                            players[0]->forwardAir();
+                        }
+                        else if (IsKeyDown(KEY_W))
+                        {
+                            players[0]->upAir();
+                        }
+                        else if (IsKeyDown(KEY_S))
+                        {
+                            players[0]->downAir();
+                        }
+                        else
+                        {
+                            players[0]->neutralAir();
+                        }
+                    }
                 }
             }
 
-            if (aliveCount <= 1)
+            // Only run AI in local PvE mode (not in networked mode)
+            if (players[1]->stocks > 0 && !players[1]->stateManager.isDying)
             {
-                gameState.changeState(GameState::GAME_OVER);
+                // Run the enhanced AI for the enemy
+                enhancedAI->Update(players, platforms);
+            }
+
+            // Check for game end conditions
+            {
+                bool allButOneDead = true;
+                int aliveCount = 0;
+
+                for (auto& player : players)
+                {
+                    if (player->stocks > 0)
+                    {
+                        aliveCount++;
+                    }
+                }
+
+                if (aliveCount <= 1)
+                {
+                    gameState.changeState(GameState::GAME_OVER);
+                }
             }
         }
         break;
@@ -483,6 +518,14 @@ void UpdateGame()
         if (IsKeyPressed(KEY_R))
         {
             gameState.resetMatch();
+        }
+
+        // Network disconnect option in pause menu
+        if (IsKeyPressed(KEY_N) && isNetworked)
+        {
+            gameState.disconnectFromGame();
+            gameState.resumeGame();
+            gameState.changeState(GameState::TITLE_SCREEN);
         }
         break;
 
@@ -499,8 +542,13 @@ void UpdateGame()
         // Results screen logic
         if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE))
         {
-            gameState.resetMatch();
-            gameState.changeState(GameState::TITLE_SCREEN);
+            // If in network mode, return to lobby
+            if (isNetworked) {
+                showNetworkMenu = true;
+            } else {
+                gameState.resetMatch();
+                gameState.changeState(GameState::TITLE_SCREEN);
+            }
         }
         break;
 
@@ -559,14 +607,31 @@ void DrawGame()
         );
     }
 
+    // Network status indicator
+    if (gameState.isNetworked())
+    {
+        Color statusColor = gameState.isNetworkHost() ? GREEN : BLUE;
+        const char* statusText = gameState.isNetworkHost() ? "HOST" : "CLIENT";
+        DrawText(statusText, SCREEN_WIDTH - 80, 10, 20, statusColor);
+
+        // Display ping
+        int ping = gameState.getAveragePing();
+        Color pingColor = (ping < 50) ? GREEN : (ping < 100) ? YELLOW : RED;
+        DrawText(TextFormat("Ping: %d ms", ping), SCREEN_WIDTH - 150, 35, 16, pingColor);
+
+        // Show "Press N for Network Menu" text
+        DrawText("Press N for Network Menu", SCREEN_WIDTH - 200, SCREEN_HEIGHT - 30, 16, WHITE);
+    }
+
     // Draw state-specific screens
     switch (gameState.currentState)
     {
     case GameState::TITLE_SCREEN:
         {
             DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, {0, 0, 0, 150});
-            DrawText("SUPER SMASH CLONE - ADVANCED AI MODE", SCREEN_WIDTH / 2 - 320, SCREEN_HEIGHT / 4, 40, WHITE);
-            DrawText("Press ENTER to Start", SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT / 2, 30, WHITE);
+            DrawText("SUPER SMASH CLONE - ULTIMATE EDITION", SCREEN_WIDTH / 2 - 320, SCREEN_HEIGHT / 4, 40, WHITE);
+            DrawText("Press ENTER to Start Local Game", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT / 2, 30, WHITE);
+            DrawText("Press N for Network Play", SCREEN_WIDTH / 2 - 180, SCREEN_HEIGHT / 2 + 50, 30, WHITE);
             DrawText("Player Controls: WASD to move, J to attack, K for special, L for smash",
                      SCREEN_WIDTH / 2 - 300, SCREEN_HEIGHT - 220, 20, WHITE);
             DrawText("I to shield/dodge, U to grab", SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT - 190, 20, WHITE);
@@ -583,8 +648,8 @@ void DrawGame()
             DrawText("3: Hard", SCREEN_WIDTH / 2 + 60, SCREEN_HEIGHT - 120, 20, hardColor);
             DrawText("4: Expert", SCREEN_WIDTH / 2 + 170, SCREEN_HEIGHT - 120, 20, expertColor);
 
-            DrawText("Can you defeat the AI? Good luck!",
-                     SCREEN_WIDTH / 2 - 170, SCREEN_HEIGHT - 80, 20, WHITE);
+            DrawText("Can you defeat the AI or challenge your friends online?",
+                     SCREEN_WIDTH / 2 - 270, SCREEN_HEIGHT - 80, 20, WHITE);
         }
         break;
 
@@ -602,6 +667,11 @@ void DrawGame()
             DrawText("PAUSED", SCREEN_WIDTH / 2 - 80, SCREEN_HEIGHT / 3, 50, WHITE);
             DrawText("Press P to Resume", SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 2, 30, WHITE);
             DrawText("Press R to Restart", SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 2 + 40, 30, WHITE);
+
+            // Show network disconnect option if in network mode
+            if (gameState.isNetworked()) {
+                DrawText("Press N to Disconnect from Network", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT / 2 + 80, 30, RED);
+            }
         }
         break;
 
@@ -626,7 +696,12 @@ void DrawGame()
             }
             else if (winnerId == 1)
             {
-                DrawText("AI WINS!", SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 3, 50, RED);
+                // Different message based on mode (AI or human opponent)
+                if (gameState.isNetworked()) {
+                    DrawText("OPPONENT WINS!", SCREEN_WIDTH / 2 - 180, SCREEN_HEIGHT / 3, 50, RED);
+                } else {
+                    DrawText("AI WINS!", SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 3, 50, RED);
+                }
             }
             else
             {
@@ -643,15 +718,31 @@ void DrawGame()
             for (int i = 0; i < players.size(); i++)
             {
                 Color playerColor = players[i]->color;
-                std::string displayName = (i == 0) ? "You" : "Enhanced AI";
+                std::string displayName;
+
+                if (gameState.isNetworked()) {
+                    displayName = (i == 0) ? "You" : "Opponent";
+                } else {
+                    displayName = (i == 0) ? "You" : "AI";
+                }
+
                 DrawText(displayName.c_str(), 200, 200 + i * 80, 30, playerColor);
                 DrawText(TextFormat("Stocks: %d", players[i]->stocks), 400, 200 + i * 80, 30, WHITE);
                 DrawText(TextFormat("Damage: %.0f%%", players[i]->damagePercent), 600, 200 + i * 80, 30, WHITE);
             }
 
-            DrawText("Press ENTER to return to title screen", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT - 100, 24, WHITE);
+            if (gameState.isNetworked()) {
+                DrawText("Press ENTER to return to lobby", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT - 100, 24, WHITE);
+            } else {
+                DrawText("Press ENTER to return to title screen", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT - 100, 24, WHITE);
+            }
         }
         break;
+    }
+
+    // Draw network UI if visible
+    if (showNetworkMenu && networkUI) {
+        networkUI->draw();
     }
 
     // Draw debug info if enabled
@@ -702,8 +793,8 @@ void DrawGame()
                 WHITE
             );
 
-            // AI state if applicable
-            if (i == 1)
+            // AI state if applicable and not in network mode
+            if (i == 1 && !gameState.isNetworked())
             {
                 const char* aiStateNames[] = {
                     "NEUTRAL", "APPROACH", "ATTACK", "PRESSURE", "BAIT",
@@ -726,12 +817,26 @@ void DrawGame()
 
         // FPS info and difficulty
         DrawText(
-            TextFormat("FPS: %d | Particles: %d | Difficulty: %.1f",
-                       GetFPS(), (int)particles.size(), difficultyLevel),
+            TextFormat("FPS: %d | Particles: %d | Difficulty: %.1f | Network: %s",
+                       GetFPS(), (int)particles.size(), difficultyLevel,
+                       gameState.isNetworked() ? (gameState.isNetworkHost() ? "HOST" : "CLIENT") : "OFF"),
             10, SCREEN_HEIGHT - 40,
             16,
             WHITE
         );
+
+        // If networked, show additional debug info
+        if (gameState.isNetworked()) {
+            DrawText(
+                TextFormat("Ping: %d ms | Sync: %.1f%% | Frame Adv: %d",
+                         gameState.getAveragePing(),
+                         gameState.getSyncPercentage(),
+                         gameState.getFrameAdvantage()),
+                10, SCREEN_HEIGHT - 20,
+                16,
+                WHITE
+            );
+        }
     }
 }
 
@@ -749,4 +854,13 @@ void CleanupGame()
 
     // Clear AI controller
     enhancedAI.reset();
+
+    // Shut down networking
+    NetworkManager::getInstance().shutdown();
+
+    // Delete network UI
+    if (networkUI) {
+        delete networkUI;
+        networkUI = nullptr;
+    }
 }

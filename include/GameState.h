@@ -28,6 +28,11 @@ public:
         RESULTS_SCREEN
     };
 
+    enum GameMode {
+        PVE_MODE,  // Player vs AI (original mode)
+        PVP_MODE   // Player vs Player (new mode)
+    };
+
     // Match settings
     struct MatchSettings {
         int stockCount;
@@ -76,6 +81,7 @@ public:
 
     std::vector<PlayerResult> results;
     int winnerIndex;
+    bool debugMode;
 
     // Constructor
     GameState();
@@ -125,7 +131,6 @@ public:
     void drawDebugInfo();
 
 private:
-    bool debugMode;
     std::string debugText;
     int titleOptionSelected;
     int characterSelectIndex[4];
