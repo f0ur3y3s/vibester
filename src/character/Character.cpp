@@ -917,6 +917,9 @@ bool Character::checkHit(Character& other) {
 
     // Check each attack hitbox
     for (auto& attack : attacks) {
+        // Skip if attack is not active
+        if (!attack.isActive) continue;
+            
         Rectangle otherHurtbox = other.getHurtbox();
 
         if (CheckCollisionRecs(attack.rect, otherHurtbox)) {
@@ -1137,7 +1140,21 @@ void Character::respawn(Vector2 spawnPoint) {
 
 // Attack position updates
 void Character::updateAttackPositions() {
+    // Remove expired or inactive attacks
+    attacks.erase(
+        std::remove_if(attacks.begin(), attacks.end(), 
+                      [](const AttackBox& attack) { return !attack.isActive; }),
+        attacks.end());
+    
+    // Update positions of remaining attacks
     for (auto& attack : attacks) {
+        // Skip projectiles as they move independently
+        if (attack.type == AttackBox::PROJECTILE) {
+            // Just update the projectile state
+            attack.update();
+            continue;
+        }
+        
         // Position the attack box relative to the character
         float offsetX = stateManager.isFacingRight ? 1.0f : -1.0f;
         float boxCenterX = physics.position.x + (attack.rect.width / 2) * offsetX;
@@ -1145,6 +1162,9 @@ void Character::updateAttackPositions() {
         // Adjust based on attack box original position
         attack.rect.x = boxCenterX - (attack.rect.width / 2);
         attack.rect.y = physics.position.y - (attack.rect.height / 2);
+        
+        // Update attack state
+        attack.update();
     }
 }
 

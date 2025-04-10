@@ -170,6 +170,9 @@ bool CharacterCollisionHandler::checkAttackCollision(Character& other) {
 
     // Check each attack hitbox
     for (auto& attack : character.attacks) {
+        // Skip inactive attacks
+        if (!attack.isActive) continue;
+        
         Rectangle otherHurtbox = other.getHurtbox();
 
         if (CheckCollisionRecs(attack.rect, otherHurtbox)) {
@@ -244,8 +247,8 @@ bool CharacterCollisionHandler::checkAttackCollision(Character& other) {
                     }
 
                     // If this is a projectile that should be destroyed on hit
-                    if (attack.type == AttackBox::PROJECTILE) {
-                        // Would need to mark for removal or handle here
+                    if (attack.type == AttackBox::PROJECTILE && attack.destroyOnHit) {
+                        attack.isActive = false;
                     }
 
                     return true;
