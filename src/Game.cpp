@@ -3,7 +3,7 @@
 #include "Platform.h"
 #include "Particle.h"
 #include "ParticleSystem.h"
-#include "Constants.h"
+#include "GameConfig.h"
 #include "Item.h"
 #include "GameState.h"
 #include "EnhancedAIController.h" // Updated include for the new AI architecture
@@ -242,6 +242,11 @@ void UpdateGame()
     // Check for character collisions for attacks
         for (auto& attacker : players)
         {
+            // Skip players who are dying or exploding
+            if (attacker->stateManager.isDying || attacker->stateManager.isExploding) {
+                continue;
+            }
+            
             if (attacker->stateManager.isAttacking)
             {
                 for (auto& defender : players)

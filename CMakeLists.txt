@@ -25,7 +25,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
-file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
+# Exclude the original files that have been refactored
+file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS 
+    "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp"
+)
+
+# Filter out the original files that have been replaced
+list(FILTER PROJECT_SOURCES EXCLUDE REGEX "^${CMAKE_CURRENT_LIST_DIR}/src/Character\\.cpp$")
+list(FILTER PROJECT_SOURCES EXCLUDE REGEX "^${CMAKE_CURRENT_LIST_DIR}/src/PhysicsState\\.cpp$")
+list(FILTER PROJECT_SOURCES EXCLUDE REGEX "^${CMAKE_CURRENT_LIST_DIR}/src/StateManager\\.cpp$")
+list(FILTER PROJECT_SOURCES EXCLUDE REGEX "^${CMAKE_CURRENT_LIST_DIR}/src/AttackBox\\.cpp$")
+
+# Set the include directories
 set(PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/src/")
 
 # Main game executable

@@ -194,6 +194,26 @@ void GameState::resetMatch() {
         player->stocks = settings.stockCount;
         player->damagePercent = 0;
         player->stateManager.isDying = false;
+        player->stateManager.isExploding = false;
+        player->stateManager.isGrabbing = false;
+        player->grabbedCharacter = nullptr;
+        player->explosionParticles.clear();
+        player->hitEffects.clear();
+        player->resetAttackState();
+        
+        // Reset position to spawn point
+        if(!spawnPoints.empty()) {
+            int spawnIndex = &player - &players[0];
+            if(spawnIndex >= 0 && spawnIndex < spawnPoints.size()) {
+                player->physics.position = spawnPoints[spawnIndex];
+            } else {
+                player->physics.position = spawnPoints[0];
+            }
+        }
+        
+        // Reset physics
+        player->physics.velocity = {0, 0};
+        player->stateManager.changeState(FALLING);
     }
 
     // Clear items and effects
