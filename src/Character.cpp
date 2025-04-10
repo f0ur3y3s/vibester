@@ -1,45 +1,19 @@
 #include "Character.h"
 #include "ParticleSystem.h"
+#include "AttackBox.h"
+#include "PhysicsState.h"
+#include "StateManager.h"
 #include <cmath>
 #include <algorithm>
-
-// HitEffect implementation
-HitEffect::HitEffect(Vector2 pos, Color col) {
-    position = pos;
-    color = col;
-    duration = 15;
-    currentFrame = 0;
-    size = 30.0f;
-}
-
-bool HitEffect::update() {
-    currentFrame++;
-    size -= 1.5f;
-    return currentFrame < duration;
-}
-
-void HitEffect::draw() {
-    float alpha = 1.0f - (float)currentFrame / duration;
-    Color effectColor = {color.r, color.g, color.b, (unsigned char)(255 * alpha)};
-    DrawCircleV(position, size, effectColor);
-
-    // Draw impact lines
-    for (int i = 0; i < 8; i++) {
-        float angle = i * 45.0f * DEG2RAD;
-        float lineLength = size * 1.5f * (1.0f - (float)currentFrame / duration);
-        Vector2 end = {
-            position.x + cos(angle) * lineLength,
-            position.y + sin(angle) * lineLength
-        };
-        DrawLineEx(position, end, 3.0f, effectColor);
-    }
-}
+#include <string>
 
 // Character implementation
-Character::Character(float x, float y, float w, float h, float spd, Color col, std::string n) {
+Character::Character(float x, float y, float w, float h, float spd, Color col, std::string n)
+{
+    // Initialize physics system
+    physics = PhysicsState(x, y);
+
     // Basic properties
-    position = {x, y};
-    velocity = {0, 0};
     width = w;
     height = h;
     speed = spd;
@@ -48,78 +22,41 @@ Character::Character(float x, float y, float w, float h, float spd, Color col, s
 
     // Smash-style properties
     damagePercent = 0.0f;
-    stocks = DEFAULT_STOCKS;
-    isInvincible = false;
-    invincibilityFrames = 0;
-
-    // State flags
-    isFacingRight = true;
-    isJumping = false;
-    hasDoubleJump = true;
-    isAttacking = false;
-    isShielding = false;
-    shieldHealth = MAX_SHIELD_HEALTH;
-    isDodging = false;
-    dodgeFrames = 0;
-    isFastFalling = false;
+    stocks = GameConfig::DEFAULT_STOCKS;
 
     // Animation variables
     currentFrame = 0;
     framesCounter = 0;
     framesSpeed = 8;
-    isHitstun = false;
-    hitstunFrames = 0;
-
-    // State machine
-    state = IDLE;
-
-    // Attack state
-    currentAttack = NONE;
-    attackDuration = 0;
-    attackFrame = 0;
-    canAttack = true;
 
     // Grab state
-    isGrabbing = false;
     grabbedCharacter = nullptr;
-    grabDuration = 0;
-    grabFrame = 0;
-
-    // Cooldowns
-    specialNeutralCD = {120, 0};
-    specialSideCD = {90, 0};
-    specialUpCD = {60, 0};
-    specialDownCD = {120, 0};
-    dodgeCD = {DODGE_COOLDOWN, 0};
 
     // Death animation
-    isDying = false;
     deathRotation = 0;
     deathScale = 1.0f;
-    deathDuration = 60;
-    deathFrame = 0;
     deathVelocity = {0, 0};
     deathPosition = {0, 0};
-    isExploding = false;
-    explosionFrame = 0;
-    explosionDuration = 60;
 }
 
-void Character::checkForExplosion() {
+void Character::checkForExplosion()
+{
     // Check if damage threshold reached for explosion
-    if (damagePercent >= 100.0f && !isDying && !isExploding) {
+    if (damagePercent >= 100.0f && !stateManager.isDying && !stateManager.isExploding)
+    {
         startExplosionAnimation();
     }
 }
 
-void Character::startExplosionAnimation() {
-    isExploding = true;
-    explosionFrame = 0;
-    explosionDuration = 60; // 1 second explosion
+void Character::startExplosionAnimation()
+{
+    stateManager.isExploding = true;
+    stateManager.explosionFrame = 0;
+    stateManager.explosionDuration = 60; // 1 second explosion
     explosionParticles.clear();
 
     // Use the enhanced explosion particle system
-    std::vector<Particle> massiveExplosion = createMassiveExplosionParticles(position, 150, color);
+    std::vector<Particle> massiveExplosion = createMassiveExplosionParticles(physics.position, 150, color);
     explosionParticles.insert(explosionParticles.end(), massiveExplosion.begin(), massiveExplosion.end());
 
     // Reduce stock after explosion
@@ -132,24 +69,22 @@ void Character::startExplosionAnimation() {
     // (These visual effects are handled in Game.cpp)
 }
 
-void Character::updateExplosionAnimation() {
-    explosionFrame++;
+void Character::updateExplosionAnimation()
+{
+    stateManager.explosionFrame++;
 
     // Update existing explosion particles
-    for (int i = 0; i < explosionParticles.size(); i++) {
-        if (!explosionParticles[i].update()) {
-            explosionParticles.erase(explosionParticles.begin() + i);
-            i--;
-        }
-    }
+    updateParticles(explosionParticles);
 
     // Add new particles during the initial phase of explosion
-    if (explosionFrame < explosionDuration / 2) {
+    if (stateManager.explosionFrame < stateManager.explosionDuration / 2)
+    {
         int particlesToAdd = 5;
-        for (int i = 0; i < particlesToAdd; i++) {
+        for (int i = 0; i < particlesToAdd; i++)
+        {
             float angle = GetRandomValue(0, 360) * DEG2RAD;
             float speed = GetRandomValue(3, 10);
-            Vector2 velocity = {
+            Vector2 particleVel = {
                 cosf(angle) * speed,
                 sinf(angle) * speed
             };
@@ -160,551 +95,565 @@ void Character::updateExplosionAnimation() {
             // Create more colorful particles for secondary explosion
             Color particleColor;
             int colorChoice = GetRandomValue(0, 3);
-            switch (colorChoice) {
-                case 0: particleColor = RED; break;
-                case 1: particleColor = ORANGE; break;
-                case 2: particleColor = YELLOW; break;
-                case 3: particleColor = WHITE; break;
+            switch (colorChoice)
+            {
+            case 0: particleColor = RED;
+                break;
+            case 1: particleColor = ORANGE;
+                break;
+            case 2: particleColor = YELLOW;
+                break;
+            case 3: particleColor = WHITE;
+                break;
             }
 
-            explosionParticles.push_back(Particle(position, velocity, size, lifespan, particleColor));
+            explosionParticles.push_back(Particle(physics.position, particleVel, size, lifespan, particleColor));
         }
     }
 
     // End explosion animation
-    if (explosionFrame >= explosionDuration) {
-        isExploding = false;
+    if (stateManager.explosionFrame >= stateManager.explosionDuration)
+    {
+        stateManager.isExploding = false;
 
         // Respawn after explosion
-        if (stocks > 0) {
+        if (stocks > 0)
+        {
             // Reset for respawn
             damagePercent = 0;
-            velocity = {0, 0};
-            isInvincible = true;
-            invincibilityFrames = 120; // 2 seconds of invincibility
+            physics.velocity = {0, 0};
+            stateManager.isInvincible = true;
+            stateManager.invincibilityFrames = 120; // 2 seconds of invincibility
 
             // Respawn at center top
-            position.x = SCREEN_WIDTH / 2;
-            position.y = 100;
+            physics.position.x = GameConfig::SCREEN_WIDTH / 2;
+            physics.position.y = 100;
 
-            changeState(FALLING);
+            stateManager.changeState(FALLING);
         }
     }
 }
 
-void Character::drawExplosionAnimation() {
+void Character::drawExplosionAnimation()
+{
     // Draw explosion particles
-    for (auto& particle : explosionParticles) {
-        particle.draw();
-    }
+    drawParticles(explosionParticles);
 
     // Draw shockwave effect
-    float shockwaveRadius = explosionFrame * 8.0f;
-    float alpha = 255 * (1.0f - (float)explosionFrame / explosionDuration);
+    float shockwaveRadius = stateManager.explosionFrame * 8.0f;
+    float alpha = 255 * (1.0f - (float)stateManager.explosionFrame / stateManager.explosionDuration);
     Color shockwaveColor = {255, 200, 50, (unsigned char)alpha};
 
-    DrawCircleLines(position.x, position.y, shockwaveRadius, shockwaveColor);
-    DrawCircleLines(position.x, position.y, shockwaveRadius * 0.7f, shockwaveColor);
+    DrawCircleLines(physics.position.x, physics.position.y, shockwaveRadius, shockwaveColor);
+    DrawCircleLines(physics.position.x, physics.position.y, shockwaveRadius * 0.7f, shockwaveColor);
 
     // Draw flash effect in early frames
-    if (explosionFrame < 10) {
-        Color flashColor = {255, 255, 255, (unsigned char)(255 * (1.0f - explosionFrame / 10.0f))};
-        DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, flashColor);
+    if (stateManager.explosionFrame < 10)
+    {
+        Color flashColor = {255, 255, 255, (unsigned char)(255 * (1.0f - stateManager.explosionFrame / 10.0f))};
+        DrawRectangle(0, 0, GameConfig::SCREEN_WIDTH, GameConfig::SCREEN_HEIGHT, flashColor);
     }
 }
 
-Rectangle Character::getRect() {
-    return {position.x - width/2, position.y - height/2, width, height};
+Rectangle Character::getRect()
+{
+    return {physics.position.x - width / 2, physics.position.y - height / 2, width, height};
 }
 
-Rectangle Character::getHurtbox() {
+Rectangle Character::getHurtbox()
+{
     // Hurtbox is slightly smaller than visual character size
     float hurtboxScale = 0.85f;
     float adjustedWidth = width * hurtboxScale;
     float adjustedHeight = height * hurtboxScale;
-    return {position.x - adjustedWidth/2, position.y - adjustedHeight/2, adjustedWidth, adjustedHeight};
+    return {
+        physics.position.x - adjustedWidth / 2, physics.position.y - adjustedHeight / 2, adjustedWidth, adjustedHeight
+    };
 }
 
-void Character::update(std::vector<Platform>& platforms) {
+void Character::update(std::vector<Platform>& platforms)
+{
+    // Check for explosion threshold first
     checkForExplosion();
 
     // Skip normal updates if exploding
-    if (isExploding) {
+    if (stateManager.isExploding)
+    {
         updateExplosionAnimation();
         return;
     }
 
     // Skip updates if dying
-    if (isDying) {
+    if (stateManager.isDying)
+    {
         updateDeathAnimation();
         return;
     }
 
-    // Update cooldowns
-    updateCooldowns();
+    // Update cooldowns and timers
+    stateManager.updateCooldowns();
+    stateManager.updateTimers();
 
-    // Variables used across all states
+    // Apply appropriate physics based on state
     bool onGround = false;
 
     // Variables for collision detection
     const int collisionSteps = 4; // Number of sub-steps for collision checking
-    float stepX = 0;
-    float stepY = 0;
-    float modifiedVelocityX = 0;
+    float stepX = physics.velocity.x / collisionSteps;
+    float stepY = physics.velocity.y / collisionSteps;
 
     // Process current state
-    switch (state) {
-        case IDLE:
-        case RUNNING:
-        case JUMPING:
-        case FALLING:
-            // Apply gravity
-            if (isFastFalling) {
-                velocity.y += FAST_FALL_GRAVITY;
-            } else {
-                velocity.y += GRAVITY;
-            }
+    switch (stateManager.state)
+    {
+    case IDLE:
+    case RUNNING:
+    case JUMPING:
+    case FALLING:
+        // Apply gravity
+        physics.applyGravity();
 
-            // Setup sub-frame precision for collision detection
-            stepX = velocity.x / collisionSteps;
-            stepY = velocity.y / collisionSteps;
+    // Handle collisions with sub-frame precision
+        for (int step = 0; step < collisionSteps; step++)
+        {
+            // Apply partial movement
+            physics.updatePositionPartial(stepX, stepY);
 
-            for (int step = 0; step < collisionSteps; step++) {
-                // Apply partial movement
-                position.x += stepX;
-                position.y += stepY;
+            // Platform collision on each sub-step
+            for (auto& platform : platforms)
+            {
+                Rectangle playerRect = getRect();
+                if (CheckCollisionRecs(playerRect, platform.rect))
+                {
+                    // Handle collision based on platform type
+                    if (platform.type == SOLID)
+                    {
+                        // SOLID platforms have collision from all sides
 
-                // Platform collision on each sub-step
-                for (auto& platform : platforms) {
-                    Rectangle playerRect = getRect();
-                    if (CheckCollisionRecs(playerRect, platform.rect)) {
-                        // Handle collision based on platform type
-                        if (platform.type == SOLID) {
-                            // SOLID platforms have collision from all sides
+                        // Top collision - only check if moving downward
+                        if (stepY > 0)
+                        {
+                            if (playerRect.y + playerRect.height > platform.rect.y &&
+                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2)
+                            {
+                                physics.position.y = platform.rect.y - height / 2;
+                                physics.velocity.y = 0;
+                                onGround = true;
 
-                            // Top collision - only check if moving downward
-                            if (stepY > 0) {
-                                if (playerRect.y + playerRect.height > platform.rect.y &&
-                                    playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
-                                    position.y = platform.rect.y - height / 2;
-                                    velocity.y = 0;
-                                    onGround = true;
-
-                                    // Reset states that need ground
-                                    if (isJumping) isJumping = false;
-                                    hasDoubleJump = true;
-                                    isHitstun = false;
-                                    break; // Found a top collision, stop checking other platforms
-                                }
-                            }
-
-                            // Side collisions - prevent movement into platforms
-                            // Only apply side collision if player's feet are below platform top
-                            // AND player's top is not above platform bottom (to allow movement under platforms)
-                            if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
-                                playerRect.y < platform.rect.y + platform.rect.height) {
-                                // Right side collision - player moving right into platform left edge
-                                if (stepX > 0 &&
-                                    playerRect.x + playerRect.width > platform.rect.x &&
-                                    playerRect.x < platform.rect.x) {
-                                    position.x = platform.rect.x - width / 2;
-                                    velocity.x = 0;
-                                }
-                                // Left side collision - player moving left into platform right edge
-                                else if (stepX < 0 &&
-                                         playerRect.x < platform.rect.x + platform.rect.width &&
-                                         playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
-                                    position.x = platform.rect.x + platform.rect.width + width / 2;
-                                    velocity.x = 0;
-                                }
+                                // Reset states that need ground
+                                if (stateManager.isJumping) stateManager.isJumping = false;
+                                stateManager.hasDoubleJump = true;
+                                stateManager.isHitstun = false;
+                                break; // Found a top collision, stop checking other platforms
                             }
                         }
-                        else if (platform.type == PASSTHROUGH) {
-                            // PASSTHROUGH platforms only have collision from above
 
-                            // Top collision - only check if moving downward
-                            if (stepY > 0) {
-                                // Previous position was above the platform
-                                if (playerRect.y + playerRect.height - stepY <= platform.rect.y) {
-                                    position.y = platform.rect.y - height / 2;
-                                    velocity.y = 0;
-                                    onGround = true;
-
-                                    // Reset states that need ground
-                                    if (isJumping) isJumping = false;
-                                    hasDoubleJump = true;
-                                    isHitstun = false;
-                                    break; // Found a top collision, stop checking other platforms
-                                }
+                        // Side collisions - prevent movement into platforms
+                        // Only apply side collision if player's feet are below platform top
+                        // AND player's top is not above platform bottom (to allow movement under platforms)
+                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                            playerRect.y < platform.rect.y + platform.rect.height)
+                        {
+                            // Right side collision - player moving right into platform left edge
+                            if (stepX > 0 &&
+                                playerRect.x + playerRect.width > platform.rect.x &&
+                                playerRect.x < platform.rect.x)
+                            {
+                                physics.position.x = platform.rect.x - width / 2;
+                                physics.velocity.x = 0;
                             }
-                            // No side or bottom collisions for passthrough platforms
+                            // Left side collision - player moving left into platform right edge
+                            else if (stepX < 0 &&
+                                playerRect.x < platform.rect.x + platform.rect.width &&
+                                playerRect.x + playerRect.width > platform.rect.x + platform.rect.width)
+                            {
+                                physics.position.x = platform.rect.x + platform.rect.width + width / 2;
+                                physics.velocity.x = 0;
+                            }
                         }
+                    }
+                    else if (platform.type == PASSTHROUGH)
+                    {
+                        // PASSTHROUGH platforms only have collision from above
+
+                        // Top collision - only check if moving downward
+                        if (stepY > 0)
+                        {
+                            // Previous position was above the platform
+                            if (playerRect.y + playerRect.height - stepY <= platform.rect.y)
+                            {
+                                physics.position.y = platform.rect.y - height / 2;
+                                physics.velocity.y = 0;
+                                onGround = true;
+
+                                // Reset states that need ground
+                                if (stateManager.isJumping) stateManager.isJumping = false;
+                                stateManager.hasDoubleJump = true;
+                                stateManager.isHitstun = false;
+                                break; // Found a top collision, stop checking other platforms
+                            }
+                        }
+                        // No side or bottom collisions for passthrough platforms
                     }
                 }
             }
+        }
 
-            // Update state based on movement
-            if (onGround) {
-                if (fabs(velocity.x) > 0.5f) {
-                    changeState(RUNNING);
-                } else {
-                    changeState(IDLE);
-                }
-            } else {
-                if (velocity.y < 0) {
-                    changeState(JUMPING);
-                } else {
-                    changeState(FALLING);
-                }
+    // Update state based on movement
+        if (onGround)
+        {
+            if (fabs(physics.velocity.x) > 0.5f)
+            {
+                stateManager.changeState(RUNNING);
             }
-
-            // Apply friction
-            if (onGround) {
-                velocity.x *= 0.9f;
-                if (fabs(velocity.x) < 0.1f) velocity.x = 0;
-            } else {
-                velocity.x *= 0.98f; // Less friction in air
+            else
+            {
+                stateManager.changeState(IDLE);
             }
-
-            // Update attack positions if attacking
-            if (isAttacking) {
-                updateAttackPositions();
-                attackFrame++;
-
-                // End attack when duration is over
-                if (attackFrame >= attackDuration) {
-                    resetAttackState();
-                }
+        }
+        else
+        {
+            if (physics.velocity.y < 0)
+            {
+                stateManager.changeState(JUMPING);
             }
-
-            // Update hitstun
-            if (isHitstun) {
-                hitstunFrames--;
-                if (hitstunFrames <= 0) {
-                    isHitstun = false;
-                }
+            else
+            {
+                stateManager.changeState(FALLING);
             }
+        }
 
-            // Update invincibility
-            if (isInvincible) {
-                invincibilityFrames--;
-                if (invincibilityFrames <= 0) {
-                    isInvincible = false;
-                }
+    // Apply friction
+        physics.applyFriction(onGround);
+
+    // Update attack positions if attacking
+        if (stateManager.isAttacking)
+        {
+            updateAttackPositions();
+            stateManager.attackFrame++;
+
+            // End attack when duration is over
+            if (stateManager.attackFrame >= stateManager.attackDuration)
+            {
+                resetAttackState();
             }
-            break;
+        }
+        break;
 
-        // Similar changes for other states...
-        case ATTACKING:
-            // Apply gravity during attacks unless it's a specific air attack type
-            velocity.y += GRAVITY;
+    case ATTACKING:
+        {
+            // Apply gravity during attacks
+            physics.applyGravity();
 
             // Limited horizontal movement during attacks
-            modifiedVelocityX = velocity.x * 0.5f;
+            float modifiedVelocityX = physics.velocity.x * 0.5f;
 
             // Setup sub-frame precision for collision detection
             stepX = modifiedVelocityX / collisionSteps;
-            stepY = velocity.y / collisionSteps;
+            stepY = physics.velocity.y / collisionSteps;
 
-            for (int step = 0; step < collisionSteps; step++) {
-                // Apply partial movement
-                position.x += stepX;
-                position.y += stepY;
+        for (int step = 0; step < collisionSteps; step++)
+        {
+            // Apply partial movement
+            physics.updatePositionPartial(stepX, stepY);
 
-                // Platform collision on each sub-step
-                for (auto& platform : platforms) {
-                    Rectangle playerRect = getRect();
-                    if (CheckCollisionRecs(playerRect, platform.rect)) {
-                        if (platform.type == SOLID) {
-                            // Full collision for solid platforms
+            // Platform collision handling - similar to above
+            for (auto& platform : platforms)
+            {
+                Rectangle playerRect = getRect();
+                if (CheckCollisionRecs(playerRect, platform.rect))
+                {
+                    if (platform.type == SOLID)
+                    {
+                        // Full collision for solid platforms
 
-                            // Top collision
-                            if (stepY > 0) {
-                                if (playerRect.y + playerRect.height > platform.rect.y &&
-                                    playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
-                                    position.y = platform.rect.y - height / 2;
-                                    velocity.y = 0;
-                                    onGround = true;
+                        // Top collision
+                        if (stepY > 0)
+                        {
+                            if (playerRect.y + playerRect.height > platform.rect.y &&
+                                playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2)
+                            {
+                                physics.position.y = platform.rect.y - height / 2;
+                                physics.velocity.y = 0;
+                                onGround = true;
 
-                                    // Ground attacks continue
-                                    // Air attacks may cancel on landing
-                                    if (currentAttack >= NEUTRAL_AIR && currentAttack <= DOWN_AIR) {
-                                        resetAttackState();
-                                        changeState(IDLE);
-                                    }
-                                    break; // Found a top collision, stop checking other platforms
+                                // Ground attacks continue
+                                // Air attacks may cancel on landing
+                                if (stateManager.currentAttack >= NEUTRAL_AIR && stateManager.currentAttack <= DOWN_AIR)
+                                {
+                                    resetAttackState();
+                                    stateManager.changeState(IDLE);
                                 }
-                            }
-
-                            // Side collisions
-                            if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
-                                playerRect.y < platform.rect.y + platform.rect.height) {
-                                // Right side collision
-                                if (stepX > 0 &&
-                                    playerRect.x + playerRect.width > platform.rect.x &&
-                                    playerRect.x < platform.rect.x) {
-                                    position.x = platform.rect.x - width / 2;
-                                    velocity.x = 0;
-                                }
-                                // Left side collision
-                                else if (stepX < 0 &&
-                                         playerRect.x < platform.rect.x + platform.rect.width &&
-                                         playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
-                                    position.x = platform.rect.x + platform.rect.width + width / 2;
-                                    velocity.x = 0;
-                                }
+                                break; // Found a top collision, stop checking other platforms
                             }
                         }
-                        else if (platform.type == PASSTHROUGH) {
-                            // Only top collision for passthrough platforms
-                            if (stepY > 0) {
-                                // Check if coming from above
-                                if (playerRect.y + playerRect.height - stepY <= platform.rect.y) {
-                                    position.y = platform.rect.y - height / 2;
-                                    velocity.y = 0;
-                                    onGround = true;
 
-                                    // Check if air attack should cancel on landing
-                                    if (currentAttack >= NEUTRAL_AIR && currentAttack <= DOWN_AIR) {
-                                        resetAttackState();
-                                        changeState(IDLE);
-                                    }
-                                    break;
+                        // Side collisions
+                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                            playerRect.y < platform.rect.y + platform.rect.height)
+                        {
+                            // Right side collision
+                            if (stepX > 0 &&
+                                playerRect.x + playerRect.width > platform.rect.x &&
+                                playerRect.x < platform.rect.x)
+                            {
+                                physics.position.x = platform.rect.x - width / 2;
+                                physics.velocity.x = 0;
+                            }
+                            // Left side collision
+                            else if (stepX < 0 &&
+                                playerRect.x < platform.rect.x + platform.rect.width &&
+                                playerRect.x + playerRect.width > platform.rect.x + platform.rect.width)
+                            {
+                                physics.position.x = platform.rect.x + platform.rect.width + width / 2;
+                                physics.velocity.x = 0;
+                            }
+                        }
+                    }
+                    else if (platform.type == PASSTHROUGH)
+                    {
+                        // Only top collision for passthrough platforms
+                        if (stepY > 0)
+                        {
+                            // Check if coming from above
+                            if (playerRect.y + playerRect.height - stepY <= platform.rect.y)
+                            {
+                                physics.position.y = platform.rect.y - height / 2;
+                                physics.velocity.y = 0;
+                                onGround = true;
+
+                                // Check if air attack should cancel on landing
+                                if (stateManager.currentAttack >= NEUTRAL_AIR && stateManager.currentAttack <= DOWN_AIR)
+                                {
+                                    resetAttackState();
+                                    stateManager.changeState(IDLE);
                                 }
+                                break;
                             }
                         }
                     }
                 }
             }
+        }
 
-            // Update attack positions and increment attack frame
-            updateAttackPositions();
-            attackFrame++;
+    // Update attack positions and increment attack frame
+        updateAttackPositions();
+        stateManager.attackFrame++;
 
-            // End attack when duration is over and transition to appropriate state
-            if (attackFrame >= attackDuration) {
-                resetAttackState();
+    // End attack when duration is over and transition to appropriate state
+        if (stateManager.attackFrame >= stateManager.attackDuration)
+        {
+            resetAttackState();
 
-                // Return to appropriate state based on position and velocity
-                if (onGround) {
-                    if (fabs(velocity.x) > 0.5f) {
-                        changeState(RUNNING);
-                    } else {
-                        changeState(IDLE);
-                    }
-                } else if (velocity.y < 0) {
-                    changeState(JUMPING);
-                } else {
-                    changeState(FALLING);
+            // Return to appropriate state based on position and velocity
+            if (onGround)
+            {
+                if (fabs(physics.velocity.x) > 0.5f)
+                {
+                    stateManager.changeState(RUNNING);
+                }
+                else
+                {
+                    stateManager.changeState(IDLE);
                 }
             }
-            break;
-
-        // Remaining states would be modified similarly...
-        case SHIELDING:
-            // Slowly regenerate shield
-            shieldHealth = std::min(shieldHealth + SHIELD_REGEN_RATE, MAX_SHIELD_HEALTH);
-
-            // No movement while shielding
-            velocity.x = 0;
-            velocity.y = 0;
-            break;
-
-        case DODGING:
-            dodgeFrames++;
-
-            // Check for invincibility frames
-            if (dodgeFrames >= DODGE_INVINCIBLE_START && dodgeFrames <= DODGE_INVINCIBLE_END) {
-                isInvincible = true;
-            } else {
-                isInvincible = false;
+            else if (physics.velocity.y < 0)
+            {
+                stateManager.changeState(JUMPING);
             }
-
-            // End dodge after duration
-            if (dodgeFrames >= SPOT_DODGE_FRAMES) {
-                isDodging = false;
-                dodgeFrames = 0;
-                isInvincible = false;
-                changeState(IDLE);
-                dodgeCD.current = dodgeCD.duration; // Start cooldown
+            else
+            {
+                stateManager.changeState(FALLING);
             }
-            break;
+        }
+        }
+        break;
 
-        case HITSTUN:
+    case SHIELDING:
+        // No movement while shielding
+        physics.velocity.x = 0;
+        physics.velocity.y = 0;
+        break;
+
+    case DODGING:
+        {
+            // Apply reduced gravity during dodges
+            physics.velocity.y += GameConfig::GRAVITY * 0.5f;
+
+            // Same collision logic as above for movement
+        for (int step = 0; step < collisionSteps; step++)
+        {
+            physics.updatePositionPartial(stepX, stepY);
+
+            // Platform collision
+            for (auto& platform : platforms)
+            {
+                Rectangle playerRect = getRect();
+                if (CheckCollisionRecs(playerRect, platform.rect))
+                {
+                    if (platform.type == SOLID)
+                    {
+                        // Top collision
+                        if (stepY > 0 && playerRect.y + playerRect.height > platform.rect.y &&
+                            playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2)
+                        {
+                            physics.position.y = platform.rect.y - height / 2;
+                            physics.velocity.y = 0;
+                            onGround = true;
+                            break;
+                        }
+
+                        // Side collisions
+                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                            playerRect.y < platform.rect.y + platform.rect.height)
+                        {
+                            // Right collision
+                            if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
+                                playerRect.x < platform.rect.x)
+                            {
+                                physics.position.x = platform.rect.x - width / 2;
+                                physics.velocity.x = 0;
+                            }
+                            // Left collision
+                            else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
+                                playerRect.x + playerRect.width > platform.rect.x + platform.rect.width)
+                            {
+                                physics.position.x = platform.rect.x + platform.rect.width + width / 2;
+                                physics.velocity.x = 0;
+                            }
+                        }
+                    }
+                    else if (platform.type == PASSTHROUGH && stepY > 0)
+                    {
+                        // Passthrough top collision
+                        if (playerRect.y + playerRect.height - stepY <= platform.rect.y)
+                        {
+                            physics.position.y = platform.rect.y - height / 2;
+                            physics.velocity.y = 0;
+                            onGround = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        }
+        break;
+
+    case HITSTUN:
+        {
             // Apply gravity
-            velocity.y += GRAVITY;
+            physics.applyGravity();
 
             // Same collision logic as above
-            // Setup sub-frame precision for collision detection
-            stepX = velocity.x / collisionSteps;
-            stepY = velocity.y / collisionSteps;
+        for (int step = 0; step < collisionSteps; step++)
+        {
+            physics.updatePositionPartial(stepX, stepY);
 
-            for (int step = 0; step < collisionSteps; step++) {
-                // Apply partial movement
-                position.x += stepX;
-                position.y += stepY;
+            for (auto& platform : platforms)
+            {
+                Rectangle playerRect = getRect();
+                if (CheckCollisionRecs(playerRect, platform.rect))
+                {
+                    if (platform.type == SOLID)
+                    {
+                        // Top collision
+                        if (stepY > 0 && playerRect.y + playerRect.height > platform.rect.y &&
+                            playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2)
+                        {
+                            physics.position.y = platform.rect.y - height / 2;
+                            physics.velocity.y = 0;
+                            onGround = true;
+                            break;
+                        }
 
-                // Platform collision handling for hitstun state
-                for (auto& platform : platforms) {
-                    Rectangle playerRect = getRect();
-                    if (CheckCollisionRecs(playerRect, platform.rect)) {
-                        if (platform.type == SOLID) {
-                            // Full collisions for solid platforms
-
-                            // Top collision
-                            if (stepY > 0) {
-                                if (playerRect.y + playerRect.height > platform.rect.y &&
-                                    playerRect.y + playerRect.height < platform.rect.y + platform.rect.height / 2) {
-                                    position.y = platform.rect.y - height / 2;
-                                    velocity.y = 0;
-                                    break; // Found a top collision, stop checking other platforms
-                                }
+                        // Side collisions
+                        if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
+                            playerRect.y < platform.rect.y + platform.rect.height)
+                        {
+                            // Right collision
+                            if (stepX > 0 && playerRect.x + playerRect.width > platform.rect.x &&
+                                playerRect.x < platform.rect.x)
+                            {
+                                physics.position.x = platform.rect.x - width / 2;
+                                physics.velocity.x = 0;
                             }
-
-                            // Side collisions
-                            if (playerRect.y + playerRect.height > platform.rect.y + 5 &&
-                                playerRect.y < platform.rect.y + platform.rect.height) {
-                                // Right side collision
-                                if (stepX > 0 &&
-                                    playerRect.x + playerRect.width > platform.rect.x &&
-                                    playerRect.x < platform.rect.x) {
-                                    position.x = platform.rect.x - width / 2;
-                                    velocity.x = 0;
-                                }
-                                // Left side collision
-                                else if (stepX < 0 &&
-                                         playerRect.x < platform.rect.x + platform.rect.width &&
-                                         playerRect.x + playerRect.width > platform.rect.x + platform.rect.width) {
-                                    position.x = platform.rect.x + platform.rect.width + width / 2;
-                                    velocity.x = 0;
-                                }
+                            // Left collision
+                            else if (stepX < 0 && playerRect.x < platform.rect.x + platform.rect.width &&
+                                playerRect.x + playerRect.width > platform.rect.x + platform.rect.width)
+                            {
+                                physics.position.x = platform.rect.x + platform.rect.width + width / 2;
+                                physics.velocity.x = 0;
                             }
                         }
-                        else if (platform.type == PASSTHROUGH) {
-                            // Only top collision for passthrough platforms
-                            if (stepY > 0) {
-                                // Check if coming from above
-                                if (playerRect.y + playerRect.height - stepY <= platform.rect.y) {
-                                    position.y = platform.rect.y - height / 2;
-                                    velocity.y = 0;
-                                    break;
-                                }
-                            }
+                    }
+                    else if (platform.type == PASSTHROUGH && stepY > 0)
+                    {
+                        // Passthrough top collision
+                        if (playerRect.y + playerRect.height - stepY <= platform.rect.y)
+                        {
+                            physics.position.y = platform.rect.y - height / 2;
+                            physics.velocity.y = 0;
+                            onGround = true;
+                            break;
                         }
                     }
                 }
             }
+        }
 
-            // Decrement hitstun
-            hitstunFrames--;
-            if (hitstunFrames <= 0) {
-                isHitstun = false;
-
-                // Return to appropriate state
-                if (velocity.y == 0) {
-                    changeState(IDLE);
-                } else if (velocity.y < 0) {
-                    changeState(JUMPING);
-                } else {
-                    changeState(FALLING);
-                }
-            }
-            break;
+    // End hitstun check handled in the stateManager.updateTimers()
+        }
+        break;
     }
 
     // Check if out of bounds
-    if (isOutOfBounds()) {
+    if (isOutOfBounds())
+    {
         startDeathAnimation();
     }
 
     // Update hit effects
-    for (int i = 0; i < hitEffects.size(); i++) {
-        if (!hitEffects[i].update()) {
+    for (int i = 0; i < hitEffects.size(); i++)
+    {
+        if (!hitEffects[i].update())
+        {
             hitEffects.erase(hitEffects.begin() + i);
             i--;
         }
     }
 }
 
-void Character::updateAttackPositions() {
-    for (auto& attack : attacks) {
+void Character::updateAttackPositions()
+{
+    for (auto& attack : attacks)
+    {
         // Position the attack box relative to the character
-        float offsetX = isFacingRight ? 1.0f : -1.0f;
-        float boxCenterX = position.x + (attack.rect.width / 2) * offsetX;
+        float offsetX = stateManager.isFacingRight ? 1.0f : -1.0f;
+        float boxCenterX = physics.position.x + (attack.rect.width / 2) * offsetX;
 
         // Adjust based on attack box original position
         attack.rect.x = boxCenterX - (attack.rect.width / 2);
-        attack.rect.y = position.y - (attack.rect.height / 2);
+        attack.rect.y = physics.position.y - (attack.rect.height / 2);
     }
 }
 
-void Character::updateCooldowns() {
-    // Update all cooldowns
-    if (specialNeutralCD.current > 0) specialNeutralCD.current--;
-    if (specialSideCD.current > 0) specialSideCD.current--;
-    if (specialUpCD.current > 0) specialUpCD.current--;
-    if (specialDownCD.current > 0) specialDownCD.current--;
-    if (dodgeCD.current > 0) dodgeCD.current--;
+void Character::changeState(CharacterState newState)
+{
+    stateManager.changeState(newState);
 }
 
-void Character::changeState(CharacterState newState) {
-    // Don't change state if already in hitstun
-    if (state == HITSTUN && newState != DYING && hitstunFrames > 0) {
-        return;
-    }
-
-    // Don't change state if currently attacking, unless hit or dying or attack is finished
-    if (state == ATTACKING && newState != HITSTUN && newState != DYING &&
-        attackFrame < attackDuration && isAttacking) {
-        return;
-    }
-
-    // State change logic
-    state = newState;
-
-    // State-specific init
-    switch (newState) {
-        case IDLE:
-            velocity.x *= 0.5f; // Slow down when returning to idle
-            break;
-
-        case JUMPING:
-            // Animation reset
-            break;
-
-        case ATTACKING:
-            // Attack init handled by specific attack methods
-            break;
-
-        case SHIELDING:
-            velocity.x = 0;
-            velocity.y = 0;
-            break;
-
-        case DODGING:
-            dodgeFrames = 0;
-            isDodging = true;
-            break;
-
-        case HITSTUN:
-            // Handled by applyKnockback
-            break;
-
-        case DYING:
-            // Handled by startDeathAnimation
-            break;
-    }
-}
-
-void Character::draw() {
+void Character::draw()
+{
     // Skip normal drawing if exploding
-    if (isExploding) {
+    if (stateManager.isExploding)
+    {
         drawExplosionAnimation();
         return;
     }
 
     // Skip normal drawing if dying
-    if (isDying) {
+    if (stateManager.isDying)
+    {
         drawDeathAnimation();
         return;
     }
@@ -713,14 +662,17 @@ void Character::draw() {
     Color drawColor = color;
 
     // Flashing for invincibility
-    if (isInvincible) {
-        if ((framesCounter / 3) % 2 == 0) {
+    if (stateManager.isInvincible)
+    {
+        if ((framesCounter / 3) % 2 == 0)
+        {
             drawColor.a = 128; // Half opacity
         }
     }
 
     // Damage gradient
-    if (damagePercent > 0) {
+    if (damagePercent > 0)
+    {
         // Gradually shift to red as damage increases
         float damageRatio = std::min(damagePercent / 150.0f, 1.0f);
         drawColor.r = std::min(255, drawColor.r + static_cast<int>(damageRatio * 100));
@@ -730,25 +682,26 @@ void Character::draw() {
 
     // Basic character drawing
     DrawRectangle(
-        static_cast<int>(position.x - width/2),
-        static_cast<int>(position.y - height/2),
+        static_cast<int>(physics.position.x - width / 2),
+        static_cast<int>(physics.position.y - height / 2),
         static_cast<int>(width),
         static_cast<int>(height),
         drawColor
     );
 
     // Direction indicator (eyes/face)
-    float eyeOffset = isFacingRight ? width * 0.2f : -width * 0.2f;
+    float eyeOffset = stateManager.isFacingRight ? width * 0.2f : -width * 0.2f;
     DrawCircle(
-        static_cast<int>(position.x + eyeOffset),
-        static_cast<int>(position.y - height * 0.1f),
+        static_cast<int>(physics.position.x + eyeOffset),
+        static_cast<int>(physics.position.y - height * 0.1f),
         width * 0.15f,
         BLACK
     );
 
     // Shield visualization
-    if (isShielding) {
-        float shieldRatio = shieldHealth / MAX_SHIELD_HEALTH;
+    if (stateManager.isShielding)
+    {
+        float shieldRatio = stateManager.shieldHealth / GameConfig::MAX_SHIELD_HEALTH;
         float shieldSize = (width + height) * 0.4f * shieldRatio;
         Color shieldColor = {100, 200, 255, 128}; // Semi-transparent blue
 
@@ -756,18 +709,21 @@ void Character::draw() {
         shieldColor.g = static_cast<unsigned char>(200 * shieldRatio);
         shieldColor.b = static_cast<unsigned char>(255 * shieldRatio);
 
-        DrawCircleV(position, shieldSize, shieldColor);
+        DrawCircleV(physics.position, shieldSize, shieldColor);
     }
 
     // Draw hitboxes if attacking (for debug)
-    if (isAttacking) {
-        for (auto& attack : attacks) {
+    if (stateManager.isAttacking)
+    {
+        for (auto& attack : attacks)
+        {
             attack.draw(true);
         }
     }
 
     // Draw hit effects
-    for (auto& effect : hitEffects) {
+    for (auto& effect : hitEffects)
+    {
         effect.draw();
     }
 
@@ -776,8 +732,8 @@ void Character::draw() {
     sprintf(damageText, "%.0f%%", damagePercent);
     DrawText(
         damageText,
-        static_cast<int>(position.x - width/2),
-        static_cast<int>(position.y - height - 20),
+        static_cast<int>(physics.position.x - width / 2),
+        static_cast<int>(physics.position.y - height - 20),
         20,
         WHITE
     );
@@ -786,61 +742,67 @@ void Character::draw() {
     framesCounter++;
 }
 
-void Character::startDeathAnimation() {
-    if (!isDying) {
-        isDying = true;
-        state = DYING;
-        deathFrame = 0;
+void Character::startDeathAnimation()
+{
+    if (!stateManager.isDying)
+    {
+        stateManager.isDying = true;
+        stateManager.state = DYING;
+        stateManager.deathFrame = 0;
         deathRotation = 0;
         deathScale = 1.0f;
 
         // Set initial death velocity based on current velocity
-        deathVelocity = velocity;
+        deathVelocity = physics.velocity;
         if (deathVelocity.y > -5.0f) deathVelocity.y = -5.0f; // Ensure upward motion
 
         // Store position at death
-        deathPosition = position;
+        deathPosition = physics.position;
 
         // Reduce stock
         stocks--;
     }
 }
 
-void Character::updateDeathAnimation() {
-    deathFrame++;
+void Character::updateDeathAnimation()
+{
+    stateManager.deathFrame++;
 
     // Update death position with velocity
     deathPosition.x += deathVelocity.x;
     deathPosition.y += deathVelocity.y;
 
     // Apply gravity to death animation
-    deathVelocity.y += GRAVITY * 0.5f;
+    deathVelocity.y += GameConfig::GRAVITY * 0.5f;
 
     // Spin and shrink
     deathRotation += 15.0f;
-    deathScale = std::max(0.0f, 1.0f - static_cast<float>(deathFrame) / deathDuration);
+    deathScale = std::max(0.0f, 1.0f - static_cast<float>(stateManager.deathFrame) / stateManager.deathDuration);
 
     // End death animation
-    if (deathFrame >= deathDuration) {
-        isDying = false;
+    if (stateManager.deathFrame >= stateManager.deathDuration)
+    {
+        stateManager.isDying = false;
 
-        if (stocks > 0) {
+        if (stocks > 0)
+        {
             // Reset for respawn
             damagePercent = 0;
-            velocity = {0, 0};
-            isInvincible = true;
-            invincibilityFrames = 120; // 2 seconds of invincibility
+            physics.velocity = {0, 0};
+            stateManager.isInvincible = true;
+            stateManager.invincibilityFrames = 120; // 2 seconds of invincibility
 
             // Respawn at center top
-            position.x = SCREEN_WIDTH / 2;
-            position.y = 100;
+            physics.position.x = GameConfig::SCREEN_WIDTH / 2;
+            physics.position.y = 100;
 
-            changeState(FALLING);
+            stateManager.changeState(FALLING);
         }
     }
 }
 
-void Character::drawDeathAnimation() {
+void Character::drawDeathAnimation()
+{
     // Draw spinning, shrinking character
     Rectangle destRect = {
         deathPosition.x,
@@ -862,7 +824,8 @@ void Character::drawDeathAnimation() {
     );
 
     // Star burst effect near end of animation
-    if (deathFrame > deathDuration * 0.7f && deathFrame % 3 == 0) {
+    if (stateManager.deathFrame > stateManager.deathDuration * 0.7f && stateManager.deathFrame % 3 == 0)
+    {
         float starAngle = static_cast<float>(GetRandomValue(0, 360));
         float starDist = static_cast<float>(GetRandomValue(10, 30));
         Vector2 starPos = {
@@ -874,808 +837,308 @@ void Character::drawDeathAnimation() {
     }
 }
 
-void Character::resetAttackState() {
-    isAttacking = false;
-    currentAttack = NONE;
-    attackDuration = 0;
-    attackFrame = 0;
+void Character::resetAttackState()
+{
+    stateManager.isAttacking = false;
+    stateManager.currentAttack = NONE;
+    stateManager.attackDuration = 0;
+    stateManager.attackFrame = 0;
     attacks.clear();
-    canAttack = true;
+    stateManager.canAttack = true;
 }
 
-void Character::respawn(Vector2 spawnPoint) {
-    position = spawnPoint;
-    velocity = {0, 0};
+void Character::respawn(Vector2 spawnPoint)
+{
+    physics.position = spawnPoint;
+    physics.velocity = {0, 0};
     damagePercent = 0;
-    isInvincible = true;
-    invincibilityFrames = 120; // 2 seconds of invincibility
+    stateManager.isInvincible = true;
+    stateManager.invincibilityFrames = 120; // 2 seconds of invincibility
     resetAttackState();
-    changeState(FALLING);
+    stateManager.changeState(FALLING);
+}
+
+bool Character::isOutOfBounds()
+{
+    return physics.position.x < GameConfig::BLAST_ZONE_LEFT ||
+        physics.position.x > GameConfig::BLAST_ZONE_RIGHT ||
+        physics.position.y < GameConfig::BLAST_ZONE_TOP ||
+        physics.position.y > GameConfig::BLAST_ZONE_BOTTOM;
 }
 
 // Movement methods
-void Character::jump() {
-    if (!isJumping && state != JUMPING) {
-        velocity.y = JUMP_FORCE;
-        isJumping = true;
-        changeState(JUMPING);
-    } else if (hasDoubleJump) {
+void Character::jump()
+{
+    if (!stateManager.isJumping && stateManager.state != JUMPING)
+    {
+        physics.velocity.y = GameConfig::JUMP_FORCE;
+        stateManager.isJumping = true;
+        stateManager.changeState(JUMPING);
+    }
+    else if (stateManager.hasDoubleJump)
+    {
         doubleJump();
     }
 }
 
-void Character::doubleJump() {
-    if (hasDoubleJump) {
-        velocity.y = DOUBLE_JUMP_FORCE;
-        hasDoubleJump = false;
-        changeState(JUMPING);
+void Character::doubleJump()
+{
+    if (stateManager.hasDoubleJump)
+    {
+        physics.velocity.y = GameConfig::DOUBLE_JUMP_FORCE;
+        stateManager.hasDoubleJump = false;
+        stateManager.changeState(JUMPING);
     }
 }
 
-void Character::moveLeft() {
-    if (state != SHIELDING && state != DODGING) {
-        velocity.x = -speed;
-        isFacingRight = false;
+void Character::moveLeft()
+{
+    if (stateManager.state != SHIELDING && stateManager.state != DODGING)
+    {
+        physics.velocity.x = -speed;
+        stateManager.isFacingRight = false;
 
-        if (state == IDLE) {
-            changeState(RUNNING);
+        if (stateManager.state == IDLE)
+        {
+            stateManager.changeState(RUNNING);
         }
     }
 }
 
-void Character::moveRight() {
-    if (state != SHIELDING && state != DODGING) {
-        velocity.x = speed;
-        isFacingRight = true;
+void Character::moveRight()
+{
+    if (stateManager.state != SHIELDING && stateManager.state != DODGING)
+    {
+        physics.velocity.x = speed;
+        stateManager.isFacingRight = true;
 
-        if (state == IDLE) {
-            changeState(RUNNING);
+        if (stateManager.state == IDLE)
+        {
+            stateManager.changeState(RUNNING);
         }
     }
 }
 
-void Character::fastFall() {
-    if (velocity.y > 0) {
-        isFastFalling = true;
-        velocity.y = std::max(velocity.y, 5.0f); // Minimum fast fall speed
+void Character::fastFall()
+{
+    physics.fastFall();
+}
+
+void Character::dropThroughPlatform()
+{
+    if (stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        // Move character down slightly to avoid immediate re-collision
+        physics.position.y += 5;
+
+        // Apply a small downward velocity to ensure continued falling
+        physics.velocity.y = 1.0f;
+
+        // Change state to falling
+        stateManager.changeState(FALLING);
     }
 }
 
 // Defense methods
-void Character::shield() {
-    if (state != JUMPING && state != FALLING && !isAttacking &&
-        shieldHealth > 0 && !isDodging) {
-        changeState(SHIELDING);
-        isShielding = true;
+void Character::shield()
+{
+    if (stateManager.state != JUMPING && stateManager.state != FALLING && !stateManager.isAttacking &&
+        stateManager.shieldHealth > 0 && !stateManager.isDodging)
+    {
+        stateManager.changeState(SHIELDING);
+        stateManager.isShielding = true;
 
         // Immobilize the character
-        velocity.x = 0;
-        velocity.y = 0;
-
-        // Shield shrinks as it takes damage
-        // (Already implemented in draw function)
-        }
-}
-
-void Character::releaseShield() {
-    if (isShielding) {
-        isShielding = false;
-        changeState(IDLE);
+        physics.velocity.x = 0;
+        physics.velocity.y = 0;
     }
 }
 
-void Character::spotDodge() {
-    if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
-        changeState(DODGING);
-        dodgeFrames = 0;
-        isDodging = true;
+void Character::releaseShield()
+{
+    if (stateManager.isShielding)
+    {
+        stateManager.isShielding = false;
+        stateManager.changeState(IDLE);
+    }
+}
+
+void Character::spotDodge()
+{
+    if (stateManager.state != JUMPING && stateManager.state != FALLING && !stateManager.dodgeCD.isActive())
+    {
+        stateManager.changeState(DODGING);
+        stateManager.dodgeFrames = 0;
+        stateManager.isDodging = true;
 
         // Stop movement during spot dodge
-        velocity.x = 0;
-        velocity.y = 0;
-
-        // Shorter duration than rolls
-        attackDuration = SPOT_DODGE_FRAMES;
-
-        // Quick invincibility but can't move
+        physics.velocity.x = 0;
+        physics.velocity.y = 0;
     }
 }
 
-void Character::forwardDodge() {
-    if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
-        changeState(DODGING);
-        dodgeFrames = 0;
-        isDodging = true;
+void Character::forwardDodge()
+{
+    if (stateManager.state != JUMPING && stateManager.state != FALLING && !stateManager.dodgeCD.isActive())
+    {
+        stateManager.changeState(DODGING);
+        stateManager.dodgeFrames = 0;
+        stateManager.isDodging = true;
 
         // Move in facing direction
-        velocity.x = isFacingRight ? speed * 1.5f : -speed * 1.5f;
-        velocity.y = 0;
-
-        // Longer duration than spot dodge
-        attackDuration = ROLL_DODGE_FRAMES;
-
-        // Movement with invincibility, but fixed path and end lag
+        physics.velocity.x = stateManager.isFacingRight ? speed * 1.5f : -speed * 1.5f;
+        physics.velocity.y = 0;
     }
 }
 
-void Character::backDodge() {
-    if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
-        changeState(DODGING);
-        dodgeFrames = 0;
-        velocity.x = isFacingRight ? -speed * 1.5f : speed * 1.5f;
-        velocity.y = 0;
+void Character::backDodge()
+{
+    if (stateManager.state != JUMPING && stateManager.state != FALLING && !stateManager.dodgeCD.isActive())
+    {
+        stateManager.changeState(DODGING);
+        stateManager.dodgeFrames = 0;
+        stateManager.isDodging = true;
+
+        physics.velocity.x = stateManager.isFacingRight ? -speed * 1.5f : speed * 1.5f;
+        physics.velocity.y = 0;
     }
 }
 
-void Character::airDodge(float dirX, float dirY) {
-    if ((state == JUMPING || state == FALLING) && dodgeCD.current <= 0) {
-        changeState(DODGING);
-        dodgeFrames = 0;
-        isDodging = true;
+void Character::airDodge(float dirX, float dirY)
+{
+    if ((stateManager.state == JUMPING || stateManager.state == FALLING) && !stateManager.dodgeCD.isActive())
+    {
+        stateManager.changeState(DODGING);
+        stateManager.dodgeFrames = 0;
+        stateManager.isDodging = true;
 
         // Normalize direction and apply speed
         float length = sqrtf(dirX * dirX + dirY * dirY);
-        if (length > 0) {
-            velocity.x = (dirX / length) * speed * 1.5f;
-            velocity.y = (dirY / length) * speed * 1.5f;
+        if (length > 0)
+        {
+            physics.velocity.x = (dirX / length) * speed * 1.5f;
+            physics.velocity.y = (dirY / length) * speed * 1.5f;
         }
-
-        // Longest dodge with highest end lag
-        attackDuration = AIR_DODGE_FRAMES;
-
-        // Special landing penalty if air dodging
-        // (would be implemented in the landing code)
     }
 }
 
+// Implementation of attack methods would go here
+// This would include all the jab, tilt, smash, aerial, and special attacks
 
-// Standard ground attacks
-void Character::jab() {
-    if (canAttack && state != JUMPING && state != FALLING) {
+// For example:
+void Character::jab()
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
         resetAttackState();
-        isAttacking = true;
-        currentAttack = JAB;
-        attackDuration = 15; // Very short duration
-        changeState(ATTACKING);
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = JAB;
+        stateManager.attackDuration = 15; // Very short duration
+        stateManager.changeState(ATTACKING);
 
         // Small hitbox with minimal knockback
         float hitboxWidth = width * 0.7f;
         float hitboxHeight = height * 0.5f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 2
+                            : physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 3.0f, 1.5f, 0.05f, isFacingRight ? 0.0f : 180.0f, 5, 5));
+        attacks.push_back(AttackBox(hitboxRect, 3.0f, 1.5f, 0.05f, stateManager.isFacingRight ? 0.0f : 180.0f, 5, 5));
 
         // Reduced end lag - can act again sooner
-        canAttack = true;
-    }
-}
-
-void Character::forwardTilt() {
-    if (canAttack && state != JUMPING && state != FALLING) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = FORWARD_TILT;
-        attackDuration = 28; // Moderate duration
-        changeState(ATTACKING);
-
-        // Good range hitbox
-        float hitboxWidth = width * 1.2f;
-        float hitboxHeight = height * 0.6f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 8.0f, 4.0f, 0.15f, isFacingRight ? 30.0f : 150.0f, 15, 12));
-    }
-}
-
-void Character::downTilt() {
-    if (canAttack && state != JUMPING && state != FALLING) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = DOWN_TILT;
-        attackDuration = 22;
-        changeState(ATTACKING);
-
-        // Low-profile hitbox
-        float hitboxWidth = width * 1.3f;
-        float hitboxHeight = height * 0.3f; // Very low profile
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y + height/2 - hitboxHeight;
-
-        // More horizontal launch angle - good for combos
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 5.0f, 2.5f, 0.1f, isFacingRight ? 15.0f : 165.0f, 10, 8));
-
-        // Add slight movement to help with combos
-        velocity.x = isFacingRight ? speed * 0.3f : -speed * 0.3f;
-    }
-}
-
-void Character::upTilt() {
-    if (canAttack && state != JUMPING && state != FALLING) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = UP_TILT;
-        attackDuration = 25;
-        changeState(ATTACKING);
-
-        // Tall, narrow hitbox above character
-        float hitboxWidth = width * 0.7f;
-        float hitboxHeight = height * 1.3f;
-        float hitboxX = position.x - hitboxWidth/2;
-        float hitboxY = position.y - hitboxHeight;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 7.0f, 3.0f, 0.15f, 80.0f, 12, 12));
-
-        // Brief vulnerability on sides during animation
-        // (implemented through narrow hitbox and animation duration)
-    }
-}
-
-void Character::dashAttack() {
-    if (canAttack && (state == RUNNING)) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = DASH_ATTACK;
-        attackDuration = 35; // Longer commitment
-        changeState(ATTACKING);
-
-        // Add significant momentum
-        velocity.x = isFacingRight ? speed * 2.0f : -speed * 2.0f;
-
-        // Forward-moving hitbox
-        float hitboxWidth = width * 1.1f;
-        float hitboxHeight = height * 0.8f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.15f, isFacingRight ? 40.0f : 140.0f, 20, 20));
-
-        // High endlag - vulnerable if missed or shielded
-        canAttack = false; // Force full animation before next action
-    }
-}
-
-// Smash attacks
-void Character::forwardSmash(float chargeTime) {
-    if (canAttack && state != JUMPING && state != FALLING) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = FORWARD_SMASH;
-        attackDuration = 45; // Very high commitment
-        changeState(ATTACKING);
-
-        // Charge multiplier (1.0 to 1.5)
-        float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
-
-        // Large, strong forward hitbox
-        float hitboxWidth = width * 1.5f;
-        float hitboxHeight = height * 0.7f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // High knockback, scaling with charge
-        attacks.push_back(AttackBox(
-            hitboxRect,
-            15.0f * chargeMultiplier,
-            8.0f * chargeMultiplier,
-            0.3f,
-            isFacingRight ? 35.0f : 145.0f,
-            25,
-            15
-        ));
-
-        // Vulnerable during endlag - major disadvantage if missed
-        velocity.x *= 0.2f; // Almost stop movement - committal
-    }
-}
-
-void Character::upSmash(float chargeTime) {
-    if (canAttack && state != JUMPING && state != FALLING) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = UP_SMASH;
-        attackDuration = 40;
-        changeState(ATTACKING);
-
-        // Charge multiplier (1.0 to 1.5)
-        float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
-
-        // Tall vertical hitbox
-        float hitboxWidth = width * 0.8f;
-        float hitboxHeight = height * 1.8f;
-        float hitboxX = position.x - hitboxWidth/2;
-        float hitboxY = position.y - hitboxHeight;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Strong vertical knockback
-        attacks.push_back(AttackBox(
-            hitboxRect,
-            14.0f * chargeMultiplier,
-            7.0f * chargeMultiplier,
-            0.35f,
-            90.0f,
-            20,
-            15
-        ));
-
-        // Vulnerable on sides - blind spot weakness
-    }
-}
-
-void Character::downSmash(float chargeTime) {
-    if (canAttack && state != JUMPING && state != FALLING) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = DOWN_SMASH;
-        attackDuration = 38;
-        changeState(ATTACKING);
-
-        // Charge multiplier (1.0 to 1.5)
-        float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
-
-        // Two hitboxes on both sides - slightly less range than fsmash
-        float hitboxWidth = width * 0.9f;
-        float hitboxHeight = height * 0.5f;
-        float hitboxY = position.y + height/2 - hitboxHeight/2;
-
-        // Left hitbox
-        Rectangle leftHitboxRect = {position.x - width/2 - hitboxWidth, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(
-            leftHitboxRect,
-            13.0f * chargeMultiplier,
-            6.0f * chargeMultiplier,
-            0.3f,
-            20.0f, // Semi-spike angle
-            20,
-            15
-        ));
-
-        // Right hitbox
-        Rectangle rightHitboxRect = {position.x + width/2, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(
-            rightHitboxRect,
-            13.0f * chargeMultiplier,
-            6.0f * chargeMultiplier,
-            0.3f,
-            160.0f, // Semi-spike angle
-            20,
-            15
-        ));
-
-        // Solid endlag but less than the other smashes
-        attackDuration = 35;
-    }
-}
-
-// Aerial attacks
-void Character::neutralAir() {
-    if (canAttack && (state == JUMPING || state == FALLING)) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = NEUTRAL_AIR;
-        attackDuration = 25;
-        changeState(ATTACKING);
-
-        // Circle hitbox around character - hits all around
-        float hitboxRadius = width * 1.2f;
-        Rectangle hitboxRect = {
-            position.x - hitboxRadius/2,
-            position.y - hitboxRadius/2,
-            hitboxRadius,
-            hitboxRadius
-        };
-
-        // Moderate damage, low knockback, faster than other aerials
-        attacks.push_back(AttackBox(hitboxRect, 8.0f, 3.0f, 0.12f, 45.0f, 15, 12));
-
-        // Low landing lag if attack has finished
-        // (would be implemented in the land function)
-    }
-}
-
-void Character::forwardAir() {
-    if (canAttack && (state == JUMPING || state == FALLING)) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = FORWARD_AIR;
-        attackDuration = 30;
-        changeState(ATTACKING);
-
-        // Forward-reaching hitbox
-        float hitboxWidth = width * 1.3f;
-        float hitboxHeight = height * 0.7f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Good damage and knockback
-        attacks.push_back(AttackBox(hitboxRect, 10.0f, 4.5f, 0.2f, isFacingRight ? 45.0f : 135.0f, 20, 15));
-
-        // Moderate landing lag penalty if not completed in air
-    }
-}
-
-void Character::backAir() {
-    if (canAttack && (state == JUMPING || state == FALLING)) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = BACK_AIR;
-        attackDuration = 28;
-        changeState(ATTACKING);
-
-        // Back hitbox (opposite of facing direction)
-        float hitboxWidth = width * 1.1f;
-        float hitboxHeight = height * 0.8f;
-        float hitboxX = isFacingRight ? position.x - width/2 - hitboxWidth : position.x + width/2;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Strong knockback - kill move
-        attacks.push_back(AttackBox(hitboxRect, 13.0f, 6.0f, 0.25f, isFacingRight ? 135.0f : 45.0f, 25, 15));
-
-        // High landing lag if not completed
-    }
-}
-
-void Character::upAir() {
-    if (canAttack && (state == JUMPING || state == FALLING)) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = UP_AIR;
-        attackDuration = 25;
-        changeState(ATTACKING);
-
-        // Upward hitbox
-        float hitboxWidth = width * 0.8f;
-        float hitboxHeight = height * 1.1f;
-        float hitboxX = position.x - hitboxWidth/2;
-        float hitboxY = position.y - height/2 - hitboxHeight;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Moderate damage, upward launch angle
-        attacks.push_back(AttackBox(hitboxRect, 9.0f, 4.0f, 0.2f, 85.0f, 15, 12));
-
-        // Medium landing lag
-        // Stronger when hit at the apex of the attack
-    }
-}
-
-void Character::downAir() {
-    if (canAttack && (state == JUMPING || state == FALLING)) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = DOWN_AIR;
-        attackDuration = 35; // Longest aerial
-        changeState(ATTACKING);
-
-        // Downward hitbox
-        float hitboxWidth = width * 0.7f;
-        float hitboxHeight = height * 1.0f;
-        float hitboxX = position.x - hitboxWidth/2;
-        float hitboxY = position.y + height/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Strong spike with high risk/reward
-        AttackBox spike(hitboxRect, 14.0f, 3.0f, 0.15f, 270.0f, 25, 20);
-        spike.canSpike = true;
-        attacks.push_back(spike);
-
-        // Very high landing lag if not completed
-        // Fast fall when using for maximum impact
-        isFastFalling = true;
-    }
-}
-
-// Special attacks
-void Character::neutralSpecial() {
-    if (canAttack && specialNeutralCD.current <= 0) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = NEUTRAL_SPECIAL;
-        attackDuration = 40;
-        specialNeutralCD.current = specialNeutralCD.duration * 0.8f; // 80% of full cooldown
-        changeState(ATTACKING);
-
-        // Projectile hitbox
-        float hitboxWidth = width * 0.8f;
-        float hitboxHeight = height * 0.6f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Medium-speed projectile with moderate damage
-        Vector2 projectileVel = {isFacingRight ? 8.0f : -8.0f, 0};
-        attacks.push_back(AttackBox(
-            hitboxRect, 8.0f, 2.0f, 0.1f, isFacingRight ? 0.0f : 180.0f, 15, 90,
-            projectileVel, true
-        ));
-
-        // Brief immobility during startup frames
-        velocity.x *= 0.3f;
-    }
-}
-
-void Character::sideSpecial() {
-    if (canAttack && specialSideCD.current <= 0) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = SIDE_SPECIAL;
-        attackDuration = 45;
-        specialSideCD.current = specialSideCD.duration;
-        changeState(ATTACKING);
-
-        // Add significant horizontal boost
-        velocity.x = isFacingRight ? speed * 2.5f : -speed * 2.5f;
-
-        // Side special hitbox
-        float hitboxWidth = width * 1.5f;
-        float hitboxHeight = height * 0.9f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 12.0f, 6.0f, 0.25f, isFacingRight ? 30.0f : 150.0f, 25, 25));
-
-        // Vulnerable during cooldown - can be punished if shielded
-    }
-}
-
-void Character::upSpecial() {
-    if (canAttack && specialUpCD.current <= 0) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = UP_SPECIAL;
-        attackDuration = 40;
-        specialUpCD.current = specialUpCD.duration;
-        changeState(ATTACKING);
-
-        // Strong vertical boost with slight horizontal component
-        velocity.y = JUMP_FORCE * 1.4f;
-        velocity.x = isFacingRight ? speed * 0.5f : -speed * 0.5f;
-
-        // Brief invincibility at startup (5 frames)
-        isInvincible = true;
-        invincibilityFrames = 5;
-
-        // Up special hitbox
-        float hitboxWidth = width * 1.2f;
-        float hitboxHeight = height * 1.5f;
-        float hitboxX = position.x - hitboxWidth/2;
-        float hitboxY = position.y - hitboxHeight;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.2f, 80.0f, 20, 20));
-
-        // High vulnerability after recovery frames - cooldown
-    }
-}
-
-void Character::downSpecial() {
-    if (canAttack && specialDownCD.current <= 0) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = DOWN_SPECIAL;
-        attackDuration = 45;
-        specialDownCD.current = specialDownCD.duration * 1.2f; // 120% cooldown for powerful move
-        changeState(ATTACKING);
-
-        // Counter/reflector hitbox
-        float hitboxWidth = width * 1.5f;
-        float hitboxHeight = height * 1.5f;
-        float hitboxX = position.x - hitboxWidth/2;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Create a reflector hitbox with counter properties
-        AttackBox reflector(hitboxRect, 6.0f, 3.0f, 0.1f, 45.0f, 15, 30, AttackBox::REFLECTOR);
-        attacks.push_back(reflector);
-
-        // High commitment - vulnerable if missed
-        // Freeze in place while countering
-        velocity.x = 0;
-        velocity.y *= 0.3f; // Reduced falling during counter
-    }
-}
-
-// Grab and throws
-void Character::grab() {
-    if (canAttack && !isGrabbing && (state != JUMPING && state != FALLING)) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = GRAB;
-        attackDuration = 25;
-        changeState(ATTACKING);
-
-        // Grab hitbox
-        float hitboxWidth = width * 0.8f;
-        float hitboxHeight = height * 0.7f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y - hitboxHeight/2;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-
-        // Grab hitbox - no damage but initiates grab state
-        AttackBox grabBox(hitboxRect, 0.0f, 0.0f, 0.0f, 0.0f, 0, 10, AttackBox::GRAB);
-        attacks.push_back(grabBox);
-
-        // High end lag if missed - very punishable
-    }
-}
-
-void Character::pummel() {
-    if (isGrabbing && grabbedCharacter != nullptr) {
-        // Add damage to grabbed character
-        grabbedCharacter->applyDamage(2.0f);
-
-        // Create hit effect at grabbed character position
-        createHitEffect(grabbedCharacter->position);
-
-        // Reset grab duration to extend hold
-        grabFrame = 0;
-    }
-}
-
-void Character::forwardThrow() {
-    if (isGrabbing && grabbedCharacter != nullptr) {
-        // Apply damage and knockback
-        grabbedCharacter->applyDamage(8.0f);
-        grabbedCharacter->applyKnockback(8.0f, 5.0f, 0.2f, isFacingRight ? 1.0f : -1.0f, 0.2f);
-
-        // Create hit effect
-        createHitEffect(grabbedCharacter->position);
-
-        // Release grab
-        releaseGrab();
-    }
-}
-
-void Character::backThrow() {
-    if (isGrabbing && grabbedCharacter != nullptr) {
-        // Apply damage and knockback
-        grabbedCharacter->applyDamage(10.0f);
-        grabbedCharacter->applyKnockback(10.0f, 6.0f, 0.25f, isFacingRight ? -1.0f : 1.0f, 0.2f);
-
-        // Create hit effect
-        createHitEffect(grabbedCharacter->position);
-
-        // Release grab
-        releaseGrab();
-    }
-}
-
-void Character::upThrow() {
-    if (isGrabbing && grabbedCharacter != nullptr) {
-        // Apply damage and knockback
-        grabbedCharacter->applyDamage(9.0f);
-        grabbedCharacter->applyKnockback(9.0f, 5.0f, 0.22f, 0.0f, -1.0f);
-
-        // Create hit effect
-        createHitEffect(grabbedCharacter->position);
-
-        // Release grab
-        releaseGrab();
-    }
-}
-
-void Character::downThrow() {
-    if (isGrabbing && grabbedCharacter != nullptr) {
-        // Apply damage and knockback
-        grabbedCharacter->applyDamage(7.0f);
-        grabbedCharacter->applyKnockback(7.0f, 3.0f, 0.15f, isFacingRight ? 0.5f : -0.5f, 0.8f);
-
-        // Create hit effect
-        createHitEffect(grabbedCharacter->position);
-
-        // Release grab
-        releaseGrab();
-    }
-}
-
-void Character::releaseGrab() {
-    if (isGrabbing && grabbedCharacter != nullptr) {
-        isGrabbing = false;
-        grabbedCharacter = nullptr;
-        grabDuration = 0;
-        grabFrame = 0;
-
-        // Return to idle state
-        changeState(IDLE);
+        stateManager.canAttack = true;
     }
 }
 
 // Collision and damage
-bool Character::checkHit(Character& other) {
+bool Character::checkHit(Character& other)
+{
     // Skip if the other character is invincible or dying
-    if (other.isInvincible || other.isDying) return false;
+    if (other.stateManager.isInvincible || other.stateManager.isDying) return false;
 
     // Check each attack hitbox
-    for (auto& attack : attacks) {
+    for (auto& attack : attacks)
+    {
         Rectangle otherHurtbox = other.getHurtbox();
 
-        if (CheckCollisionRecs(attack.rect, otherHurtbox)) {
+        if (CheckCollisionRecs(attack.rect, otherHurtbox))
+        {
             // Handle different hitbox types
-            switch (attack.type) {
-                case AttackBox::GRAB:
-                    // Initiate grab
-                    if (!other.isShielding) {
-                        isGrabbing = true;
-                        grabbedCharacter = &other;
-                        grabDuration = 120; // Hold for 2 seconds max
-                        grabFrame = 0;
+            switch (attack.type)
+            {
+            case AttackBox::GRAB:
+                // Initiate grab
+                if (!other.stateManager.isShielding)
+                {
+                    stateManager.isGrabbing = true;
+                    grabbedCharacter = &other;
+                    stateManager.grabDuration = 120; // Hold for 2 seconds max
+                    stateManager.grabFrame = 0;
 
-                        // Position the grabbed character
-                        float grabOffset = isFacingRight ? width : -width;
-                        other.position.x = position.x + grabOffset;
-                        other.position.y = position.y;
+                    // Position the grabbed character
+                    float grabOffset = stateManager.isFacingRight ? width : -width;
+                    other.physics.position.x = physics.position.x + grabOffset;
+                    other.physics.position.y = physics.position.y;
 
-                        other.velocity = {0, 0};
-                        other.isHitstun = true;
-                        other.hitstunFrames = 1; // Keep in hitstun while grabbed
+                    other.physics.velocity = {0, 0};
+                    other.stateManager.isHitstun = true;
+                    other.stateManager.hitstunFrames = 1; // Keep in hitstun while grabbed
+                }
+                break;
+
+            case AttackBox::NORMAL:
+            default:
+                // Handle shield
+                if (other.stateManager.isShielding)
+                {
+                    // Reduce shield health
+                    other.stateManager.shieldHealth -= attack.damage * GameConfig::SHIELD_DAMAGE_MULTIPLIER;
+
+                    // Shield break
+                    if (other.stateManager.shieldHealth <= 0)
+                    {
+                        other.stateManager.shieldHealth = 0;
+                        other.stateManager.isShielding = false;
+                        other.stateManager.isHitstun = true;
+                        other.stateManager.hitstunFrames = GameConfig::SHIELD_BREAK_STUN;
+
+                        // Apply upward knockback
+                        other.physics.velocity.y = -8.0f;
                     }
-                    break;
 
-                case AttackBox::NORMAL:
-                default:
-                    // Handle shield
-                    if (other.isShielding) {
-                        // Reduce shield health
-                        other.shieldHealth -= attack.damage * SHIELD_DAMAGE_MULTIPLIER;
+                    // Shield stun
+                    other.stateManager.isHitstun = true;
+                    other.stateManager.hitstunFrames = GameConfig::SHIELD_STUN_FRAMES + attack.shieldStun;
+                }
+                else
+                {
+                    // Apply damage and knockback
+                    other.applyDamage(attack.damage);
 
-                        // Shield break
-                        if (other.shieldHealth <= 0) {
-                            other.shieldHealth = 0;
-                            other.isShielding = false;
-                            other.isHitstun = true;
-                            other.hitstunFrames = SHIELD_BREAK_STUN;
+                    // Calculate knockback direction
+                    float knockbackAngle = attack.knockbackAngle * DEG2RAD;
+                    float directionX = cosf(knockbackAngle);
+                    float directionY = sinf(knockbackAngle);
 
-                            // Apply upward knockback
-                            other.velocity.y = -8.0f;
-                        }
+                    // Apply knockback
+                    other.applyKnockback(
+                        attack.damage,
+                        attack.baseKnockback,
+                        attack.knockbackScaling,
+                        directionX,
+                        directionY
+                    );
 
-                        // Shield stun
-                        other.isHitstun = true;
-                        other.hitstunFrames = SHIELD_STUN_FRAMES + attack.shieldStun;
-                    } else {
-                        // Apply damage and knockback
-                        other.applyDamage(attack.damage);
-
-                        // Calculate knockback direction
-                        float knockbackAngle = attack.knockbackAngle * DEG2RAD;
-                        float directionX = cosf(knockbackAngle);
-                        float directionY = sinf(knockbackAngle);
-
-                        // Apply knockback
-                        other.applyKnockback(
-                            attack.damage,
-                            attack.baseKnockback,
-                            attack.knockbackScaling,
-                            directionX,
-                            directionY
-                        );
-
-                        // Create hit effect
-                        Vector2 hitPos = {
-                            (attack.rect.x + attack.rect.width/2 + otherHurtbox.x + otherHurtbox.width/2) / 2,
-                            (attack.rect.y + attack.rect.height/2 + otherHurtbox.y + otherHurtbox.height/2) / 2
-                        };
-                        createHitEffect(hitPos);
-                    }
-                    break;
+                    // Create hit effect
+                    Vector2 hitPos = {
+                        (attack.rect.x + attack.rect.width / 2 + otherHurtbox.x + otherHurtbox.width / 2) / 2,
+                        (attack.rect.y + attack.rect.height / 2 + otherHurtbox.y + otherHurtbox.height / 2) / 2
+                    };
+                    createHitEffect(hitPos);
+                }
+                break;
             }
 
             return true;
@@ -1685,55 +1148,639 @@ bool Character::checkHit(Character& other) {
     return false;
 }
 
-void Character::applyDamage(float damage) {
-    // Add damage percentage, capped at maximum
-    damagePercent = std::min(damagePercent + damage, MAX_DAMAGE);
+void Character::applyDamage(float damage)
+{
+    damagePercent += damage;
+    if (damagePercent > GameConfig::MAX_DAMAGE)
+    {
+        damagePercent = GameConfig::MAX_DAMAGE;
+    }
 }
 
-void Character::applyKnockback(float damage, float baseKnockback, float knockbackScaling, float directionX, float directionY) {
-    // Calculate knockback magnitude (Smash-style formula)
-    float knockbackMagnitude = baseKnockback + (damage * damagePercent * DAMAGE_SCALING * knockbackScaling);
+void Character::applyKnockback(float damage, float baseKnockback, float knockbackScaling, float directionX,
+                               float directionY)
+{
+    // Calculate knockback based on damage and scaling
+    float damageMultiplier = 1.0f + (damagePercent * GameConfig::DAMAGE_SCALING);
+    float knockbackMagnitude = baseKnockback + (knockbackScaling * damageMultiplier);
 
-    // Apply knockback vector
-    velocity.x = directionX * knockbackMagnitude;
-    velocity.y = directionY * knockbackMagnitude;
+    // Apply knockback velocity
+    physics.velocity.x = directionX * knockbackMagnitude;
+    physics.velocity.y = directionY * knockbackMagnitude;
 
-    // Apply hitstun based on knockback
-    int hitstunAmount = static_cast<int>(knockbackMagnitude * HITSTUN_MULTIPLIER);
-    isHitstun = true;
-    hitstunFrames = hitstunAmount;
+    // Cap vertical velocity to prevent extreme values
+    physics.capVerticalVelocity(30.0f);
 
-    // Change state
-    changeState(HITSTUN);
+    // Set hitstun frames based on knockback
+    stateManager.isHitstun = true;
+    stateManager.hitstunFrames = static_cast<int>(knockbackMagnitude * GameConfig::HITSTUN_MULTIPLIER);
 
-    // Cap maximum knockback to prevent phasing through floors
-    const float MAX_KNOCKBACK_Y = 20.0f;
-    if (velocity.y > MAX_KNOCKBACK_Y) velocity.y = MAX_KNOCKBACK_Y;
-    if (velocity.y < -MAX_KNOCKBACK_Y) velocity.y = -MAX_KNOCKBACK_Y;
+    // Change state to hitstun
+    stateManager.changeState(HITSTUN);
+
+    // Reset aerial state
+    stateManager.isJumping = false;
+    stateManager.hasDoubleJump = false; // Lose double jump when hit hard
 }
 
-void Character::createHitEffect(Vector2 position) {
-    // Create hit effect at position
-    hitEffects.push_back(HitEffect(position, WHITE));
+void Character::createHitEffect(Vector2 position)
+{
+    hitEffects.push_back(HitEffect(position, color));
 }
 
-bool Character::isOutOfBounds() {
-    return position.x < BLAST_ZONE_LEFT ||
-           position.x > BLAST_ZONE_RIGHT ||
-           position.y < BLAST_ZONE_TOP ||
-           position.y > BLAST_ZONE_BOTTOM;
+// HitEffect implementation
+HitEffect::HitEffect(Vector2 pos, Color col)
+{
+    position = pos;
+    color = col;
+    duration = 10;
+    currentFrame = 0;
+    size = 20.0f;
 }
 
-void Character::dropThroughPlatform() {
-    // Check if character is standing on a platform
-    if (state == IDLE || state == RUNNING) {
-        // Move character down slightly to avoid immediate re-collision
-        position.y += 5;
+bool HitEffect::update()
+{
+    currentFrame++;
+    return currentFrame < duration;
+}
 
-        // Apply a small downward velocity to ensure continued falling
-        velocity.y = 1.0f;
+// HitEffect draw method - separate from Character draw
+void HitEffect::draw()
+{
+    float scale = 1.0f - static_cast<float>(currentFrame) / duration;
+    float alpha = 255.0f * scale;
 
-        // Change state to falling
-        changeState(FALLING);
+    Color effectColor = color;
+    effectColor.a = static_cast<unsigned char>(alpha);
+
+    DrawCircleV(position, size * scale, effectColor);
+    DrawCircleLines(position.x, position.y, size * scale * 1.2f, effectColor);
+}
+
+// Accessor method implementations
+void Character::releaseGrab()
+{
+    if (stateManager.isGrabbing && grabbedCharacter != nullptr)
+    {
+        stateManager.isGrabbing = false;
+        grabbedCharacter = nullptr;
+        stateManager.grabFrame = 0;
+    }
+}
+
+float Character::getDamagePercent() const
+{
+    return damagePercent;
+}
+
+int Character::getStocks() const
+{
+    return stocks;
+}
+
+std::string Character::getName() const
+{
+    return name;
+}
+
+// Implementation of missing attack methods
+void Character::forwardTilt()
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = FORWARD_TILT;
+        stateManager.attackDuration = 20;
+        stateManager.changeState(ATTACKING);
+
+        // Create forward tilt hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 0.4f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 2
+                            : physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y - height * 0.1f;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 6.0f, 3.5f, 0.1f, stateManager.isFacingRight ? 30.0f : 150.0f, 8, 8));
+    }
+}
+
+void Character::upTilt()
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = UP_TILT;
+        stateManager.attackDuration = 18;
+        stateManager.changeState(ATTACKING);
+
+        // Create up tilt hitbox
+        float hitboxWidth = width * 0.7f;
+        float hitboxHeight = height * 0.8f;
+        float hitboxX = physics.position.x - hitboxWidth / 2;
+        float hitboxY = physics.position.y - height / 2 - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 5.0f, 2.0f, 0.12f, 80.0f, 8, 8));
+    }
+}
+
+void Character::downTilt()
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = DOWN_TILT;
+        stateManager.attackDuration = 15;
+        stateManager.changeState(ATTACKING);
+
+        // Create down tilt hitbox
+        float hitboxWidth = width * 1.0f;
+        float hitboxHeight = height * 0.3f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 4
+                            : physics.position.x - width / 4 - hitboxWidth;
+        float hitboxY = physics.position.y + height / 2 - hitboxHeight;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 5.0f, 1.5f, 0.08f, 0.0f, 5, 5));
+    }
+}
+
+void Character::dashAttack()
+{
+    if (stateManager.canAttack)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = DASH_ATTACK;
+        stateManager.attackDuration = 25;
+        stateManager.changeState(ATTACKING);
+
+        // Add momentum to dash attack
+        physics.velocity.x = stateManager.isFacingRight ? speed * 1.5f : -speed * 1.5f;
+
+        // Create dash attack hitbox
+        float hitboxWidth = width * 1.0f;
+        float hitboxHeight = height * 0.6f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 2
+                            : physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 7.0f, 4.0f, 0.15f, stateManager.isFacingRight ? 30.0f : 150.0f, 10, 10));
+    }
+}
+
+// Smash Attacks
+void Character::forwardSmash(float chargeTime)
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = FORWARD_SMASH;
+        stateManager.attackDuration = 30;
+        stateManager.changeState(ATTACKING);
+
+        // Charge multiplier (1.0 to 1.5)
+        float chargeMultiplier = 1.0f + (chargeTime / 60.0f) * 0.5f;
+        if (chargeMultiplier > 1.5f) chargeMultiplier = 1.5f;
+
+        // Create forward smash hitbox
+        float hitboxWidth = width * 1.2f;
+        float hitboxHeight = height * 0.6f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 2
+                            : physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(
+            hitboxRect,
+            12.0f * chargeMultiplier,
+            6.0f * chargeMultiplier,
+            0.25f * chargeMultiplier,
+            stateManager.isFacingRight ? 30.0f : 150.0f,
+            15,
+            15
+        ));
+    }
+}
+
+void Character::upSmash(float chargeTime)
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = UP_SMASH;
+        stateManager.attackDuration = 30;
+        stateManager.changeState(ATTACKING);
+
+        // Charge multiplier (1.0 to 1.5)
+        float chargeMultiplier = 1.0f + (chargeTime / 60.0f) * 0.5f;
+        if (chargeMultiplier > 1.5f) chargeMultiplier = 1.5f;
+
+        // Create up smash hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 1.2f;
+        float hitboxX = physics.position.x - hitboxWidth / 2;
+        float hitboxY = physics.position.y - height / 2 - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(
+            hitboxRect,
+            13.0f * chargeMultiplier,
+            7.0f * chargeMultiplier,
+            0.2f * chargeMultiplier,
+            90.0f,
+            15,
+            15
+        ));
+    }
+}
+
+void Character::downSmash(float chargeTime)
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = DOWN_SMASH;
+        stateManager.attackDuration = 35;
+        stateManager.changeState(ATTACKING);
+
+        // Charge multiplier (1.0 to 1.5)
+        float chargeMultiplier = 1.0f + (chargeTime / 60.0f) * 0.5f;
+        if (chargeMultiplier > 1.5f) chargeMultiplier = 1.5f;
+
+        // Create two hitboxes, one on each side
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 0.4f;
+        
+        // Left hitbox
+        float leftHitboxX = physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y + height / 2 - hitboxHeight;
+        Rectangle leftHitboxRect = {leftHitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        
+        // Right hitbox
+        float rightHitboxX = physics.position.x + width / 2;
+        Rectangle rightHitboxRect = {rightHitboxX, hitboxY, hitboxWidth, hitboxHeight};
+
+        attacks.push_back(AttackBox(
+            leftHitboxRect,
+            11.0f * chargeMultiplier,
+            5.5f * chargeMultiplier,
+            0.2f * chargeMultiplier,
+            20.0f,
+            15,
+            15
+        ));
+        
+        attacks.push_back(AttackBox(
+            rightHitboxRect,
+            11.0f * chargeMultiplier,
+            5.5f * chargeMultiplier,
+            0.2f * chargeMultiplier,
+            160.0f,
+            15,
+            15
+        ));
+    }
+}
+
+// Aerial attacks
+void Character::neutralAir()
+{
+    if (stateManager.canAttack && (stateManager.state == JUMPING || stateManager.state == FALLING))
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = NEUTRAL_AIR;
+        stateManager.attackDuration = 25;
+        stateManager.changeState(ATTACKING);
+
+        // Create circular hitbox around character
+        float hitboxSize = width * 1.2f;
+        float hitboxX = physics.position.x - hitboxSize / 2;
+        float hitboxY = physics.position.y - hitboxSize / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxSize, hitboxSize};
+        attacks.push_back(AttackBox(hitboxRect, 8.0f, 3.0f, 0.1f, 45.0f, 8, 8));
+    }
+}
+
+void Character::forwardAir()
+{
+    if (stateManager.canAttack && (stateManager.state == JUMPING || stateManager.state == FALLING))
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = FORWARD_AIR;
+        stateManager.attackDuration = 20;
+        stateManager.changeState(ATTACKING);
+
+        // Create forward air hitbox
+        float hitboxWidth = width * 0.9f;
+        float hitboxHeight = height * 0.5f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 2
+                            : physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 9.0f, 4.0f, 0.15f, stateManager.isFacingRight ? 45.0f : 135.0f, 12, 12));
+    }
+}
+
+void Character::backAir()
+{
+    if (stateManager.canAttack && (stateManager.state == JUMPING || stateManager.state == FALLING))
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = BACK_AIR;
+        stateManager.attackDuration = 22;
+        stateManager.changeState(ATTACKING);
+
+        // Create back air hitbox
+        float hitboxWidth = width * 0.9f;
+        float hitboxHeight = height * 0.5f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x - width / 2 - hitboxWidth
+                            : physics.position.x + width / 2;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.2f, stateManager.isFacingRight ? 135.0f : 45.0f, 15, 15));
+    }
+}
+
+void Character::upAir()
+{
+    if (stateManager.canAttack && (stateManager.state == JUMPING || stateManager.state == FALLING))
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = UP_AIR;
+        stateManager.attackDuration = 18;
+        stateManager.changeState(ATTACKING);
+
+        // Create up air hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 0.7f;
+        float hitboxX = physics.position.x - hitboxWidth / 2;
+        float hitboxY = physics.position.y - height / 2 - hitboxHeight;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 7.0f, 3.5f, 0.15f, 80.0f, 10, 10));
+    }
+}
+
+void Character::downAir()
+{
+    if (stateManager.canAttack && (stateManager.state == JUMPING || stateManager.state == FALLING))
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = DOWN_AIR;
+        stateManager.attackDuration = 25;
+        stateManager.changeState(ATTACKING);
+
+        // Create down air hitbox
+        float hitboxWidth = width * 0.6f;
+        float hitboxHeight = height * 0.8f;
+        float hitboxX = physics.position.x - hitboxWidth / 2;
+        float hitboxY = physics.position.y + height / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.2f, 270.0f, 15, 15));
+    }
+}
+
+// Special moves
+void Character::neutralSpecial()
+{
+    if (stateManager.canAttack && !stateManager.specialNeutralCD.isActive())
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = NEUTRAL_SPECIAL;
+        stateManager.attackDuration = 30;
+        stateManager.changeState(ATTACKING);
+        stateManager.specialNeutralCD.reset();
+
+        // Create projectile hitbox
+        float hitboxWidth = width * 0.5f;
+        float hitboxHeight = width * 0.5f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width
+                            : physics.position.x - width - hitboxWidth;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 8.0f, 3.0f, 0.1f, stateManager.isFacingRight ? 0.0f : 180.0f, 10, 10));
+    }
+}
+
+void Character::sideSpecial()
+{
+    if (stateManager.canAttack && !stateManager.specialSideCD.isActive())
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = SIDE_SPECIAL;
+        stateManager.attackDuration = 35;
+        stateManager.changeState(ATTACKING);
+        stateManager.specialSideCD.reset();
+
+        // Add momentum to side special
+        physics.velocity.x = stateManager.isFacingRight ? speed * 2.0f : -speed * 2.0f;
+
+        // Create side special hitbox
+        float hitboxWidth = width * 1.2f;
+        float hitboxHeight = height * 0.7f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 2
+                            : physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 12.0f, 6.0f, 0.2f, stateManager.isFacingRight ? 45.0f : 135.0f, 15, 15));
+    }
+}
+
+void Character::upSpecial()
+{
+    if (stateManager.canAttack && !stateManager.specialUpCD.isActive())
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = UP_SPECIAL;
+        stateManager.attackDuration = 40;
+        stateManager.changeState(ATTACKING);
+        stateManager.specialUpCD.reset();
+
+        // Recovery move - vertical boost
+        physics.velocity.y = GameConfig::JUMP_FORCE * 1.5f;
+        physics.velocity.x = stateManager.isFacingRight ? speed * 0.5f : -speed * 0.5f;
+
+        // Restore double jump for recovery
+        stateManager.hasDoubleJump = true;
+
+        // Create up special hitbox that follows the character
+        float hitboxWidth = width * 1.1f;
+        float hitboxHeight = height * 1.1f;
+        float hitboxX = physics.position.x - hitboxWidth / 2;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 7.0f, 5.0f, 0.15f, 80.0f, 12, 12));
+    }
+}
+
+void Character::downSpecial()
+{
+    if (stateManager.canAttack && !stateManager.specialDownCD.isActive())
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = DOWN_SPECIAL;
+        stateManager.attackDuration = 45;
+        stateManager.changeState(ATTACKING);
+        stateManager.specialDownCD.reset();
+
+        // Counter move - delay the actual hitbox creation for timing
+        // Actual hitbox will be created during the attack update
+        // For now just set up the state
+
+        // Create visual indicator hitbox (no damage)
+        float hitboxWidth = width * 1.5f;
+        float hitboxHeight = height * 1.5f;
+        float hitboxX = physics.position.x - hitboxWidth / 2;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        // Counter hitboxes should be created dynamically when hit
+    }
+}
+
+// Grab and throws
+void Character::grab()
+{
+    if (stateManager.canAttack && stateManager.state != JUMPING && stateManager.state != FALLING)
+    {
+        resetAttackState();
+        stateManager.isAttacking = true;
+        stateManager.currentAttack = GRAB;
+        stateManager.attackDuration = 20;
+        stateManager.changeState(ATTACKING);
+
+        // Create grab hitbox
+        float hitboxWidth = width * 0.6f;
+        float hitboxHeight = height * 0.6f;
+        float hitboxX = stateManager.isFacingRight
+                            ? physics.position.x + width / 2
+                            : physics.position.x - width / 2 - hitboxWidth;
+        float hitboxY = physics.position.y - hitboxHeight / 2;
+
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        AttackBox grabBox(hitboxRect, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0);
+        grabBox.type = AttackBox::GRAB;
+        attacks.push_back(grabBox);
+    }
+}
+
+void Character::pummel()
+{
+    if (stateManager.isGrabbing && grabbedCharacter != nullptr)
+    {
+        // Apply damage to grabbed opponent
+        grabbedCharacter->applyDamage(2.0f);
+        createHitEffect(grabbedCharacter->physics.position);
+        
+        // Extend grab duration slightly
+        stateManager.grabFrame -= 10;
+        if (stateManager.grabFrame < 0) stateManager.grabFrame = 0;
+    }
+}
+
+void Character::forwardThrow()
+{
+    if (stateManager.isGrabbing && grabbedCharacter != nullptr)
+    {
+        // Release and throw forward
+        float direction = stateManager.isFacingRight ? 1.0f : -1.0f;
+        
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(8.0f);
+        grabbedCharacter->applyKnockback(8.0f, 5.0f, 0.15f, direction, -0.2f);
+        
+        // Create hit effect
+        createHitEffect(grabbedCharacter->physics.position);
+        
+        // Release the grab
+        releaseGrab();
+    }
+}
+
+void Character::backThrow()
+{
+    if (stateManager.isGrabbing && grabbedCharacter != nullptr)
+    {
+        // Release and throw backward
+        float direction = stateManager.isFacingRight ? -1.0f : 1.0f;
+        
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(10.0f);
+        grabbedCharacter->applyKnockback(10.0f, 6.0f, 0.2f, direction, -0.1f);
+        
+        // Create hit effect
+        createHitEffect(grabbedCharacter->physics.position);
+        
+        // Release the grab
+        releaseGrab();
+    }
+}
+
+void Character::upThrow()
+{
+    if (stateManager.isGrabbing && grabbedCharacter != nullptr)
+    {
+        // Release and throw upward
+        
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(7.0f);
+        grabbedCharacter->applyKnockback(7.0f, 5.0f, 0.15f, 0.0f, -1.0f);
+        
+        // Create hit effect
+        createHitEffect(grabbedCharacter->physics.position);
+        
+        // Release the grab
+        releaseGrab();
+    }
+}
+
+void Character::downThrow()
+{
+    if (stateManager.isGrabbing && grabbedCharacter != nullptr)
+    {
+        // Release and throw downward (bounce)
+        
+        // Apply damage and knockback
+        grabbedCharacter->applyDamage(6.0f);
+        grabbedCharacter->applyKnockback(6.0f, 4.0f, 0.1f, 0.0f, 0.5f);
+        
+        // Create hit effect
+        createHitEffect(grabbedCharacter->physics.position);
+        
+        // Release the grab
+        releaseGrab();
     }
 }

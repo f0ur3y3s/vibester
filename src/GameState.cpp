@@ -193,7 +193,7 @@ void GameState::resetMatch() {
     for (auto& player : players) {
         player->stocks = settings.stockCount;
         player->damagePercent = 0;
-        player->isDying = false;
+        player->stateManager.isDying = false;
     }
 
     // Clear items and effects

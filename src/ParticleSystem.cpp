@@ -1,13 +1,6 @@
 #include "ParticleSystem.h"
 #include <math.h>
 
-// Helper function to clamp values
-float clamp(float value, float min, float max) {
-    if (value < min) return min;
-    if (value > max) return max;
-    return value;
-}
-
 // Create splash particles for effects like landing, hits, etc.
 std::vector<Particle> createSplashParticles(Vector2 position, int count) {
     std::vector<Particle> particles;
@@ -67,6 +60,63 @@ std::vector<Particle> createBlastParticles(Vector2 position, int count, Color ba
             (unsigned char)clamp(baseColor.b + GetRandomValue(-20, 20), 0, 255),
             255
         };
+
+        particles.push_back(Particle(position, velocity, size, lifespan, color));
+    }
+
+    return particles;
+}
+
+// Create explosion particles
+std::vector<Particle> createExplosionParticles(Vector2 position, int count, Color baseColor) {
+    std::vector<Particle> particles;
+    particles.reserve(count);
+
+    for (int i = 0; i < count; i++) {
+        // Random angle and speed
+        float angle = GetRandomValue(0, 360) * DEG2RAD;
+        float speed = GetRandomValue(2, 8);
+        Vector2 velocity = {
+            cosf(angle) * speed,
+            sinf(angle) * speed
+        };
+
+        // Random particle properties
+        float size = GetRandomValue(2, 6);
+        int lifespan = GetRandomValue(15, 45);
+
+        // Slightly vary the color
+        Color particleColor = baseColor;
+        particleColor.r = (unsigned char)clamp(particleColor.r + GetRandomValue(-20, 20), 0, 255);
+        particleColor.g = (unsigned char)clamp(particleColor.g + GetRandomValue(-20, 20), 0, 255);
+        particleColor.b = (unsigned char)clamp(particleColor.b + GetRandomValue(-20, 20), 0, 255);
+
+        particles.push_back(Particle(position, velocity, size, lifespan, particleColor));
+    }
+
+    return particles;
+}
+
+// Create hit particles
+std::vector<Particle> createHitParticles(Vector2 position, Vector2 direction, int count, Color color) {
+    std::vector<Particle> particles;
+    particles.reserve(count);
+
+    float baseAngle = atan2f(direction.y, direction.x);
+
+    for (int i = 0; i < count; i++) {
+        // Particles spread in the general direction of the hit
+        float angleSpread = GetRandomValue(-30, 30) * DEG2RAD;
+        float angle = baseAngle + angleSpread;
+        float speed = GetRandomValue(3, 8);
+
+        Vector2 velocity = {
+            cosf(angle) * speed,
+            sinf(angle) * speed
+        };
+
+        float size = GetRandomValue(2, 5);
+        int lifespan = GetRandomValue(10, 25);
 
         particles.push_back(Particle(position, velocity, size, lifespan, color));
     }
@@ -188,4 +238,26 @@ std::vector<Particle> createMassiveExplosionParticles(Vector2 position, int coun
     }
 
     return particles;
+}
+
+// Function to update particles
+bool updateParticles(std::vector<Particle>& particles) {
+    for (int i = 0; i < particles.size(); i++) {
+        if (!particles[i].update()) {
+            // Remove dead particles
+            particles.erase(particles.begin() + i);
+            i--;
+        }
+    }
+
+    return !particles.empty();
+}
+
+// Function to draw particles
+void drawParticles(const std::vector<Particle>& particles) {
+    for (int i = 0; i < particles.size(); i++) {
+        // Create a non-const copy to work around the const issue
+        Particle p = particles[i];
+        p.draw();
+    }
 }

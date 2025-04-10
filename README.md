@@ -8,18 +8,18 @@ A 2D platform fighting game inspired by Super Smash Bros, built with Raylib.
 
 - [Overview](#overview)
 - [Building the Project](#building-the-project)
-  - [Prerequisites](#prerequisites)
-  - [Build Instructions](#build-instructions)
-  - [Troubleshooting](#troubleshooting)
+    - [Prerequisites](#prerequisites)
+    - [Build Instructions](#build-instructions)
+    - [Troubleshooting](#troubleshooting)
 - [Game Controls](#game-controls)
-  - [Basic Movement](#basic-movement)
-  - [Attack System](#attack-system)
-  - [Defensive Options](#defensive-options)
-  - [Advanced Techniques](#advanced-techniques)
+    - [Basic Movement](#basic-movement)
+    - [Attack System](#attack-system)
+    - [Defensive Options](#defensive-options)
+    - [Advanced Techniques](#advanced-techniques)
 - [Game Mechanics](#game-mechanics)
-  - [Platform Types](#platform-types)
-  - [Damage and Knockback System](#damage-and-knockback-system)
-  - [Character States](#character-states)
+    - [Platform Types](#platform-types)
+    - [Damage and Knockback System](#damage-and-knockback-system)
+    - [Character States](#character-states)
 - [AI System](#ai-system)
 - [Development Notes](#development-notes)
 - [License](#license)
@@ -115,7 +115,9 @@ cmake --build . --config Release
 #### Common Build Issues
 
 1. **Missing Raylib dependencies**
-  - CMake should handle downloading Raylib, but if you encounter errors, try installing Raylib manually:
+
+- CMake should handle downloading Raylib, but if you encounter errors, try installing Raylib manually:
+
    ```bash
    git clone https://github.com/raysan5/raylib.git
    cd raylib/src
@@ -124,13 +126,17 @@ cmake --build . --config Release
    ```
 
 2. **fmin/std::min error**
-  - If you get errors about `fmin` not being declared, ensure you've included `<algorithm>` and use `std::min` instead.
+
+- If you get errors about `fmin` not being declared, ensure you've included `<algorithm>` and use `std::min` instead.
 
 3. **Linker errors**
-  - On Linux, you might need additional libraries: `-lGL -lm -lpthread -ldl -lrt -lX11`
+
+- On Linux, you might need additional libraries: `-lGL -lm -lpthread -ldl -lrt -lX11`
 
 4. **CMake not finding Raylib**
-  - Set Raylib's installation path manually:
+
+- Set Raylib's installation path manually:
+
    ```bash
    cmake .. -DCMAKE_PREFIX_PATH=/path/to/raylib/installation
    ```
@@ -139,28 +145,29 @@ cmake --build . --config Release
 
 ### Basic Movement
 
-| Action           | Key                   |
-|------------------|------------------------|
-| Movement         | WASD                   |
-| Left             | A                      |
-| Right            | D                      |
-| Jump             | W                      |
-| Fast Fall        | S (in air)             |
-| Drop Through     | S (on platform)        |
-| Face Left/Right  | (Automatic based on movement) |
+| Action          | Key                           |
+|-----------------|-------------------------------|
+| Movement        | WASD                          |
+| Left            | A                             |
+| Right           | D                             |
+| Jump            | W                             |
+| Fast Fall       | S (in air)                    |
+| Drop Through    | S (on platform)               |
+| Face Left/Right | (Automatic based on movement) |
 
 ### Attack System
 
-| Action           | Key                   |
-|------------------|------------------------|
-| Basic Attack     | J                      |
-| Special Attack   | K                      |
-| Smash Attack     | L                      |
-| Grab             | U                      |
+| Action         | Key |
+|----------------|-----|
+| Basic Attack   | J   |
+| Special Attack | K   |
+| Smash Attack   | L   |
+| Grab           | U   |
 
 #### Directional Attacks
 
 Basic attacks (J) while holding a direction:
+
 - Neutral: J alone
 - Forward: J + D (or J + A if facing right)
 - Up: J + W
@@ -169,6 +176,7 @@ Basic attacks (J) while holding a direction:
 #### Aerial Attacks
 
 When in the air, the attack controls change:
+
 - Neutral Air: J alone
 - Forward Air: J + D (or J + A if facing right)
 - Back Air: J + A (or J + D if facing right)
@@ -178,6 +186,7 @@ When in the air, the attack controls change:
 #### Special Attacks
 
 Special attacks (K) while holding a direction:
+
 - Neutral: K alone
 - Side: K + D/A
 - Up: K + W
@@ -186,6 +195,7 @@ Special attacks (K) while holding a direction:
 #### Smash Attacks
 
 Smash attacks (L) while holding a direction:
+
 - Forward: L + D/A
 - Up: L + W
 - Down: L + S
@@ -201,25 +211,25 @@ Smash attacks (L) while holding a direction:
 
 ### Defensive Options
 
-| Action           | Key                   |
-|------------------|------------------------|
-| Shield           | I (hold)               |
-| Spot Dodge       | I + S                  |
-| Forward Roll     | I + D                  |
-| Backward Roll    | I + A                  |
-| Air Dodge        | I (in air)             |
+| Action        | Key        |
+|---------------|------------|
+| Shield        | I (hold)   |
+| Spot Dodge    | I + S      |
+| Forward Roll  | I + D      |
+| Backward Roll | I + A      |
+| Air Dodge     | I (in air) |
 
 ### Advanced Techniques
 
-| Technique        | Input                 |
-|------------------|------------------------|
-| Fast Fall        | S (at peak of jump)    |
-| Platform Drop    | S (while on platform)  |
-| Short Hop        | Tap W quickly          |
-| Dash Attack      | J during run           |
+| Technique             | Input                  |
+|-----------------------|------------------------|
+| Fast Fall             | S (at peak of jump)    |
+| Platform Drop         | S (while on platform)  |
+| Short Hop             | Tap W quickly          |
+| Dash Attack           | J during run           |
 | Directional Air Dodge | I + Direction (in air) |
-| Shield Cancel    | Release I              |
-| Shield Grab      | U while shielding      |
+| Shield Cancel         | Release I              |
+| Shield Grab           | U while shielding      |
 
 ## Game Mechanics
 
@@ -228,16 +238,18 @@ Smash attacks (L) while holding a direction:
 The game features two types of platforms:
 
 1. **Solid Platforms (SOLID)**
-  - Collision from all directions
-  - Cannot pass through from any side
-  - Typically used for main stage platforms and walls
+
+- Collision from all directions
+- Cannot pass through from any side
+- Typically used for main stage platforms and walls
 
 2. **Pass-Through Platforms (PASSTHROUGH)**
-  - Collision only from above
-  - Can jump up through from below
-  - Can move horizontally through
-  - Can drop down by pressing S
-  - Highlighted only on top edge for visual distinction
+
+- Collision only from above
+- Can jump up through from below
+- Can move horizontally through
+- Can drop down by pressing S
+- Highlighted only on top edge for visual distinction
 
 ### Damage and Knockback System
 
@@ -266,14 +278,15 @@ Characters can be in various states that affect their available actions:
 
 The game features an enhanced AI opponent with different difficulty levels:
 
-| Difficulty Level | Key         | Description                                      |
-|------------------|-------------|--------------------------------------------------|
-| Easy             | 1           | Slower reactions, makes frequent mistakes        |
-| Medium           | 2           | Balanced AI with moderate skill                  |
-| Hard             | 3           | Quick reactions, smarter decision making         |
-| Expert           | 4           | Tournament-level AI with advanced techniques     |
+| Difficulty Level | Key | Description                                  |
+|------------------|-----|----------------------------------------------|
+| Easy             | 1   | Slower reactions, makes frequent mistakes    |
+| Medium           | 2   | Balanced AI with moderate skill              |
+| Hard             | 3   | Quick reactions, smarter decision making     |
+| Expert           | 4   | Tournament-level AI with advanced techniques |
 
 The AI features:
+
 - Adaptive behavior that responds to player patterns
 - Multiple combat states (neutral, approach, attack, defend, etc.)
 - Risk/reward decision making
