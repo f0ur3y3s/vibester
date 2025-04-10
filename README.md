@@ -1,180 +1,299 @@
-# Vibester - A Super Smash Bros Style PvE Fighting Game
+# Super Smash Clone
 
-Vibester is a 2D platform fighting game inspired by Super Smash Bros, built with C++ and Raylib. Play against an AI opponent in this fast-paced combat game.
+A 2D platform fighting game inspired by Super Smash Bros, built with Raylib.
 
-## Build Instructions
+![Game Screenshot](screenshot.png)
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Building the Project](#building-the-project)
+  - [Prerequisites](#prerequisites)
+  - [Build Instructions](#build-instructions)
+  - [Troubleshooting](#troubleshooting)
+- [Game Controls](#game-controls)
+  - [Basic Movement](#basic-movement)
+  - [Attack System](#attack-system)
+  - [Defensive Options](#defensive-options)
+  - [Advanced Techniques](#advanced-techniques)
+- [Game Mechanics](#game-mechanics)
+  - [Platform Types](#platform-types)
+  - [Damage and Knockback System](#damage-and-knockback-system)
+  - [Character States](#character-states)
+- [AI System](#ai-system)
+- [Development Notes](#development-notes)
+- [License](#license)
+
+## Overview
+
+Super Smash Clone is a platform fighter that replicates the core mechanics of Super Smash Bros. The game features:
+
+- Smash-style movement and physics
+- Percentage-based damage system
+- Directional attacks and knockback
+- Stock-based lives system
+- Platform collision with pass-through platforms
+- Advanced AI opponent with multiple difficulty levels
+
+## Building the Project
 
 ### Prerequisites
 
-- CMake (3.0 or higher)
-- C++ compiler with C++11 support
-- Raylib dependencies (handled automatically by CMake)
+- C++11 compatible compiler (GCC, Clang, MSVC)
+- CMake 3.10 or higher
+- Git
+- Raylib dependencies (automatically handled by CMake)
 
-### Building the Game
-
-#### Using CLion:
-
-1. Open the project in CLion
-2. Click on the build button or use the keyboard shortcut (Ctrl+F9)
-3. Run the executable from the Run menu or use the keyboard shortcut (Shift+F10)
-
-#### Using Command Line:
+#### Linux Dependencies
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/vibester.git
-cd vibester
+# Ubuntu/Debian
+sudo apt update
+sudo apt install build-essential git cmake libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev
 
-# Create and navigate to build directory
-mkdir -p build
+# Fedora
+sudo dnf install gcc-c++ git cmake alsa-lib-devel libX11-devel libXrandr-devel libXi-devel mesa-libGL-devel mesa-libGLU-devel libXcursor-devel libXinerama-devel
+```
+
+#### macOS Dependencies
+
+```bash
+# Using Homebrew
+brew install cmake
+```
+
+#### Windows Dependencies
+
+- Visual Studio with C++ development workload
+- CMake (can be installed through Visual Studio)
+- Git for Windows
+
+### Build Instructions
+
+#### Clone the Repository
+
+```bash
+git clone https://github.com/yourusername/super-smash-clone.git
+cd super-smash-clone
+```
+
+#### CMake Build (all platforms)
+
+```bash
+mkdir build
 cd build
-
-# Generate build files with CMake
 cmake ..
-
-# Build the project
-make
-
-# Run the game
-./test_toilet
 ```
 
-#### Using Snap CLion's CMake:
-
-If you're using the Snap version of CLion:
+#### Linux/macOS Build
 
 ```bash
-/snap/clion/332/bin/cmake/linux/x64/bin/cmake --build /path/to/vibester/cmake-build-debug --target test_toilet -j 38
+make -j$(nproc)  # Linux
+make -j$(sysctl -n hw.ncpu)  # macOS
 ```
+
+#### Windows Build
+
+```bash
+# Using Visual Studio
+cmake --build . --config Release
+
+# Or open the generated .sln file in Visual Studio and build
+```
+
+#### Run the Game
+
+```bash
+# From the build directory
+./test_toilet  # Linux/macOS
+.\Debug\test_toilet.exe  # Windows (Debug build)
+.\Release\test_toilet.exe  # Windows (Release build)
+```
+
+### Troubleshooting
+
+#### Common Build Issues
+
+1. **Missing Raylib dependencies**
+  - CMake should handle downloading Raylib, but if you encounter errors, try installing Raylib manually:
+   ```bash
+   git clone https://github.com/raysan5/raylib.git
+   cd raylib/src
+   make PLATFORM=PLATFORM_DESKTOP
+   sudo make install
+   ```
+
+2. **fmin/std::min error**
+  - If you get errors about `fmin` not being declared, ensure you've included `<algorithm>` and use `std::min` instead.
+
+3. **Linker errors**
+  - On Linux, you might need additional libraries: `-lGL -lm -lpthread -ldl -lrt -lX11`
+
+4. **CMake not finding Raylib**
+  - Set Raylib's installation path manually:
+   ```bash
+   cmake .. -DCMAKE_PREFIX_PATH=/path/to/raylib/installation
+   ```
 
 ## Game Controls
 
-### Player Controls:
+### Basic Movement
 
-#### Movement:
-- **W**: Jump
-- **A**: Move left
-- **D**: Move right
-- **S**: Fast fall
+| Action           | Key                   |
+|------------------|------------------------|
+| Movement         | WASD                   |
+| Left             | A                      |
+| Right            | D                      |
+| Jump             | W                      |
+| Fast Fall        | S (in air)             |
+| Drop Through     | S (on platform)        |
+| Face Left/Right  | (Automatic based on movement) |
 
-#### Standard Attacks:
-- **J**: Jab/Neutral attack (context-sensitive)
-- **K + direction**: Special attack
-  - **K (neutral)**: Neutral special
-  - **K + W**: Up special (recovery)
-  - **K + A/D**: Side special
-  - **K + S**: Down special
+### Attack System
 
-#### Smash Attacks:
-- **L + direction**: Smash attack
-  - **L + W**: Up smash
-  - **L + A/D**: Forward smash
-  - **L + S**: Down smash
+| Action           | Key                   |
+|------------------|------------------------|
+| Basic Attack     | J                      |
+| Special Attack   | K                      |
+| Smash Attack     | L                      |
+| Grab             | U                      |
 
-#### Defense:
-- **I**: Shield
-- **I + direction**: Dodge
-  - **I + A**: Dodge left
-  - **I + D**: Dodge right
-  - **I + S**: Spot dodge
+#### Directional Attacks
 
-#### Grabs:
-- **U**: Grab
-- When grabbing:
-  - **J**: Pummel
-  - **W**: Up throw
-  - **A**: Back throw
-  - **D**: Forward throw
-  - **S**: Down throw
+Basic attacks (J) while holding a direction:
+- Neutral: J alone
+- Forward: J + D (or J + A if facing right)
+- Up: J + W
+- Down: J + S
 
-### Enemy AI:
+#### Aerial Attacks
 
-The game features an AI-controlled enemy that:
-- Tracks your position and moves accordingly
-- Uses a variety of attacks based on distance
-- Performs recovery moves when knocked off stage
-- Uses shields and dodges to avoid attacks
-- Makes combat decisions with some randomness for unpredictability
+When in the air, the attack controls change:
+- Neutral Air: J alone
+- Forward Air: J + D (or J + A if facing right)
+- Back Air: J + A (or J + D if facing right)
+- Up Air: J + W
+- Down Air: J + S
 
-### Other Controls:
+#### Special Attacks
 
-- **P** or **ESC**: Pause game
-- **R** (when paused): Restart game
-- **F1**: Toggle debug mode
-- **Enter/Space**: Confirm/Continue at title and results screens
+Special attacks (K) while holding a direction:
+- Neutral: K alone
+- Side: K + D/A
+- Up: K + W
+- Down: K + S
+
+#### Smash Attacks
+
+Smash attacks (L) while holding a direction:
+- Forward: L + D/A
+- Up: L + W
+- Down: L + S
+
+#### Grab and Throws
+
+- Grab: U
+- Pummel: J (while grabbing)
+- Forward Throw: D (while grabbing)
+- Back Throw: A (while grabbing)
+- Up Throw: W (while grabbing)
+- Down Throw: S (while grabbing)
+
+### Defensive Options
+
+| Action           | Key                   |
+|------------------|------------------------|
+| Shield           | I (hold)               |
+| Spot Dodge       | I + S                  |
+| Forward Roll     | I + D                  |
+| Backward Roll    | I + A                  |
+| Air Dodge        | I (in air)             |
+
+### Advanced Techniques
+
+| Technique        | Input                 |
+|------------------|------------------------|
+| Fast Fall        | S (at peak of jump)    |
+| Platform Drop    | S (while on platform)  |
+| Short Hop        | Tap W quickly          |
+| Dash Attack      | J during run           |
+| Directional Air Dodge | I + Direction (in air) |
+| Shield Cancel    | Release I              |
+| Shield Grab      | U while shielding      |
 
 ## Game Mechanics
 
-### Core Mechanics:
+### Platform Types
 
-- **Damage System**: Characters accumulate damage percentage. Higher damage means more knockback when hit.
-- **Knockback**: Characters are knocked back based on damage percentage, attack power, and angle.
-- **Stock System**: Each player has a set number of lives (stocks).
-- **Blast Zones**: Getting knocked out of the screen's blast zones leads to losing a stock.
+The game features two types of platforms:
 
-### Advanced Mechanics:
+1. **Solid Platforms (SOLID)**
+  - Collision from all directions
+  - Cannot pass through from any side
+  - Typically used for main stage platforms and walls
 
-- **Double Jump**: Characters can jump a second time in the air.
-- **Fast Fall**: Press down while falling to increase falling speed.
-- **Shielding**: Reduces damage and knockback but deteriorates with use.
-- **Dodging**: Brief invincibility frames to avoid attacks.
-- **Grabs and Throws**: Bypass shields and offer different knockback options.
-- **Air Attacks**: Different attacks can be performed while airborne.
-- **Smash Attacks**: Stronger versions of standard attacks.
-- **Special Attacks**: Unique abilities including projectiles and recovery moves.
+2. **Pass-Through Platforms (PASSTHROUGH)**
+  - Collision only from above
+  - Can jump up through from below
+  - Can move horizontally through
+  - Can drop down by pressing S
+  - Highlighted only on top edge for visual distinction
 
-## Architecture Overview
+### Damage and Knockback System
 
-- **Character System**: Handles character states, attacks, physics, and collision
-- **Platform System**: Creates the stage with collision detection
-- **Attack System**: Manages hitboxes, damage, and knockback calculations
-- **Particle System**: Visual effects for hits, explosions, and movement
-- **Game State Management**: Controls game flow between menu, character selection, play, and results
-- **Input Handling**: Processes player inputs and translates them to character actions
+Similar to Smash Bros, the game uses a percentage-based damage system:
 
-## Technical Details
+- Characters accumulate damage as a percentage (0% to 999%)
+- Higher damage leads to greater knockback when hit
+- Knockback formula: `baseKnockback + (damage * damagePercent * DAMAGE_SCALING * knockbackScaling)`
+- Characters are KO'd when knocked beyond the blast zones
 
-### Key Classes:
+### Character States
 
-- **Character**: Manages character state, movement, attacks, and collision
-- **AttackBox**: Handles hitboxes, damage calculations, and knockback
-- **Platform**: Provides collision surfaces for characters
-- **Particle/ParticleSystem**: Visual effects for impacts and deaths
-- **GameState**: Controls game flow and state transitions
-- **Item**: (Future implementation) Power-ups and weapons
+Characters can be in various states that affect their available actions:
 
-### Files Overview:
+- IDLE: Standing still
+- RUNNING: Moving horizontally on ground
+- JUMPING: Moving upward in the air
+- FALLING: Moving downward in the air
+- ATTACKING: Performing an attack (cannot be interrupted)
+- SHIELDING: Blocking attacks
+- DODGING: Invincible roll/spot dodge
+- HITSTUN: Being hit and unable to act
+- DYING: Death animation after being KO'd
 
-- **main.cpp**: Original entry point, now renamed to avoid conflicts
-- **Game.cpp**: Current main entry point with game loop and core logic 
-- **Character.h/cpp**: Character class implementation
-- **AttackBox.h/cpp**: Hitbox and attack system
-- **Platform.h/cpp**: Stage platforms
-- **Particle.h/cpp**: Individual particle effects
-- **ParticleSystem.h/cpp**: Particle generation and management
-- **GameState.h/cpp**: Game state management
-- **Item.h**: Item system (partial implementation)
-- **Constants.h**: Game constants and configuration
-- **Stage.h**: Stage definitions (not fully implemented)
+## AI System
 
-## Troubleshooting
+The game features an enhanced AI opponent with different difficulty levels:
 
-If you encounter build errors:
+| Difficulty Level | Key         | Description                                      |
+|------------------|-------------|--------------------------------------------------|
+| Easy             | 1           | Slower reactions, makes frequent mistakes        |
+| Medium           | 2           | Balanced AI with moderate skill                  |
+| Hard             | 3           | Quick reactions, smarter decision making         |
+| Expert           | 4           | Tournament-level AI with advanced techniques     |
 
-1. **Multiple main definitions**: Make sure you're using the latest code where this issue is fixed
-2. **CMake not found**: Verify CMake is installed or use the CLion embedded version
-3. **Missing Raylib**: The FetchContent in CMake should automatically download Raylib
-4. **Compiler errors**: Ensure you have a C++11 compatible compiler
+The AI features:
+- Adaptive behavior that responds to player patterns
+- Multiple combat states (neutral, approach, attack, defend, etc.)
+- Risk/reward decision making
+- Combo recognition and execution
+- Edge guarding and recovery strategies
 
-## Future Development
+## Development Notes
 
-- Complete item system implementation
-- Add more character types with unique movesets
-- Implement stage hazards and interactive elements
-- Add sound effects and music
-- Create more particle effects and visual polish
-- Implement a proper character selection screen
+- Built using Raylib for rendering and input
+- Custom physics system for platform fighting mechanics
+- Character state machine for managing actions and animations
+- Hitbox/hurtbox system for precise collision detection
+- AI system based on utility-based decision making
 
-## Credits
+## License
 
-Built with [Raylib](https://www.raylib.com/) - a simple and easy-to-use library for game development.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Inspired by Nintendo's Super Smash Bros series
+- Raylib library by Ramon Santamaria
+- Contributors and testers
