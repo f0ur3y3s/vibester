@@ -21,7 +21,8 @@ namespace GameConfig {
     constexpr float FAST_FALL_GRAVITY = 0.8f;
     constexpr float JUMP_FORCE = -12.0f;
     constexpr float DOUBLE_JUMP_FORCE = -10.0f;
-    
+    constexpr float GROUND_FRICTION = 0.45f; // Adjust this value as needed
+
     // Character constants
     constexpr int DEFAULT_STOCKS = 3;
     constexpr float MAX_DAMAGE = 999.0f;

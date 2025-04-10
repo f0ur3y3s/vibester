@@ -169,9 +169,14 @@ bool CharacterCollisionHandler::checkAttackCollision(Character& other) {
     }
 
     // Check each attack hitbox
-    for (auto& attack : character.attacks) {
+    for (auto it = character.attacks.begin(); it != character.attacks.end(); ) {
+        auto& attack = *it;
+        
         // Skip inactive attacks
-        if (!attack.isActive) continue;
+        if (!attack.isActive) {
+            ++it;
+            continue;
+        }
         
         Rectangle otherHurtbox = other.getHurtbox();
 
@@ -249,8 +254,13 @@ bool CharacterCollisionHandler::checkAttackCollision(Character& other) {
                     // If this is a projectile that should be destroyed on hit
                     if (attack.type == AttackBox::PROJECTILE && attack.destroyOnHit) {
                         attack.isActive = false;
+                        // Remove the projectile from the attack list
+                        it = character.attacks.erase(it);
+                        return true;
                     }
 
+                    // For non-projectile attacks, increment iterator
+                    ++it;
                     return true;
             }
         }

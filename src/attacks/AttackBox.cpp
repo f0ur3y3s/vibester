@@ -17,13 +17,57 @@ AttackBox::AttackBox(
       hitLag(lag),
       shieldStun(shield),
       type(NORMAL),
-      isActive(true)
+      isActive(true),
+      duration(10),
+      currentFrame(0),
+      velocity({0, 0}),
+      destroyOnHit(false)
 {
 }
 
-void AttackBox::update()
+AttackBox::AttackBox(
+    Rectangle r, 
+    float dmg, 
+    float baseKb, 
+    float kbScaling, 
+    float kbAngle, 
+    int lag, 
+    int dur,
+    Vector2 vel, 
+    bool destroy
+) 
+    : rect(r),
+      damage(dmg),
+      baseKnockback(baseKb),
+      knockbackScaling(kbScaling),
+      knockbackAngle(kbAngle),
+      hitLag(lag),
+      shieldStun(0),
+      type(PROJECTILE),
+      isActive(true),
+      duration(dur),
+      currentFrame(0),
+      velocity(vel),
+      destroyOnHit(destroy)
 {
-    // Future update mechanics can be implemented here
+}
+
+bool AttackBox::update()
+{
+    // For projectiles, update position
+    if (type == PROJECTILE) {
+        rect.x += velocity.x;
+        rect.y += velocity.y;
+    }
+
+    // Check duration
+    currentFrame++;
+    if (currentFrame >= duration) {
+        isActive = false;
+        return false;
+    }
+
+    return true;
 }
 
 void AttackBox::draw(bool debug)

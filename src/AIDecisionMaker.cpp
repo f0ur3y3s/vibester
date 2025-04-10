@@ -49,10 +49,27 @@ void AIDecisionMaker::DetermineNextAction(std::vector<Character*>& players,
         (GetRandomValue(0, 100) / 100.0f) *
         config.difficulty.reactionTimeVariance *
         (1.0f - config.difficulty.decisionQuality));
+    
+    // Expert AI can react during combo/recover, others may not react at all
+    // if in the middle of something (modeling panic/tunnel vision)
+    if (config.difficulty.adaptability < 0.5f && 
+        (aiState.GetCurrentState() == EnhancedAIState::ATTACK || 
+         aiState.GetCurrentState() == EnhancedAIState::RETREAT ||
+         aiState.GetCurrentState() == EnhancedAIState::PRESSURE)) {
+        // Low adaptability means we stick with current state longer
+        reactionDelay += 15;
+    }
+
+    // Add buffer to recovery reactions for low skill (makes for easier edge guarding)
+    if (config.difficulty.recoverySkill < 0.5f && 
+        aiState.GetCurrentState() == EnhancedAIState::RECOVER) {
+        reactionDelay += 10;
+    }
 
     if (aiState.stateTimer < reactionDelay &&
-        aiState.GetCurrentState() != EnhancedAIState::RECOVER &&
-        aiState.GetCurrentState() != EnhancedAIState::COMBO)
+        (config.difficulty.adaptability < 0.8f || // Low adaptability AI doesn't switch quickly
+         (aiState.GetCurrentState() != EnhancedAIState::RECOVER && 
+          aiState.GetCurrentState() != EnhancedAIState::COMBO)))
     {
         return;
     }
@@ -79,7 +96,22 @@ void AIDecisionMaker::DetermineNextAction(std::vector<Character*>& players,
     // RECOVER - highest priority if off stage
     if (aiState.IsOffStage())
     {
-        stateOptions.push_back({EnhancedAIState::RECOVER, 10.0f});
+        // Make recovery priority dependent on actual danger level
+        float recoveryPriority = 10.0f;
+        
+        // Check if we're just slightly off stage or in serious danger
+        Vector2 pos = enemy->physics.position;
+        bool inExtremeDanger = pos.x < GameConfig::BLAST_ZONE_LEFT + 80 ||
+                            pos.x > GameConfig::BLAST_ZONE_RIGHT - 80 ||
+                            pos.y < GameConfig::BLAST_ZONE_TOP + 80 ||
+                            pos.y > GameConfig::BLAST_ZONE_BOTTOM - 80;
+        
+        if (!inExtremeDanger) {
+            // If not in extreme danger, consider other actions too
+            recoveryPriority = 8.5f;
+        }
+        
+        stateOptions.push_back({EnhancedAIState::RECOVER, recoveryPriority});
     }
 
     // EDGE_GUARD - high priority if player is off stage and we're not
@@ -593,7 +625,20 @@ bool AIDecisionMaker::IsOffStage(Vector2 position, const std::vector<Platform>& 
         position.y < GameConfig::BLAST_ZONE_TOP + 100 ||
         position.y > GameConfig::BLAST_ZONE_BOTTOM - 100);
 
-    return !aboveMainStage || nearBlastzone;
+    // Fix: Only consider a character off-stage if they're not above the platform AND are far enough away horizontally
+    // This prevents the AI from thinking it's off-stage when it's just in the air
+    bool significantlyOffStage = !aboveMainStage && 
+                              (position.x < mainPlatform.x - 75 ||
+                               position.x > mainPlatform.x + mainPlatform.width + 75);
+
+    // Consider danger zone near blast zone
+    bool inDangerZone = position.x < GameConfig::BLAST_ZONE_LEFT + 60 ||
+                      position.x > GameConfig::BLAST_ZONE_RIGHT - 60 ||
+                      position.y < GameConfig::BLAST_ZONE_TOP + 60 ||
+                      position.y > GameConfig::BLAST_ZONE_BOTTOM - 60;
+
+    // Only consider off stage if significantly off stage OR in real danger near blastzones
+    return significantlyOffStage || inDangerZone;
 }
 
 bool AIDecisionMaker::AttemptCombo(EnhancedAIState& aiState, Character* enemy, Character* player)

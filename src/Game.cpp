@@ -171,26 +171,30 @@ void UpdateGame()
             gameState.changeState(GameState::GAME_START);
         }
 
-    // Difficulty setting
+    // Difficulty setting with clear indication
         if (IsKeyPressed(KEY_ONE))
         {
             difficultyLevel = 0.2f; // Easy
             enhancedAI->SetDifficulty(difficultyLevel);
+            DrawText("EASY MODE SELECTED", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 + 50, 20, GREEN);
         }
         else if (IsKeyPressed(KEY_TWO))
         {
             difficultyLevel = 0.5f; // Medium
             enhancedAI->SetDifficulty(difficultyLevel);
+            DrawText("MEDIUM MODE SELECTED", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 + 50, 20, YELLOW);
         }
         else if (IsKeyPressed(KEY_THREE))
         {
             difficultyLevel = 0.8f; // Hard
             enhancedAI->SetDifficulty(difficultyLevel);
+            DrawText("HARD MODE SELECTED", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 + 50, 20, ORANGE);
         }
         else if (IsKeyPressed(KEY_FOUR))
         {
             difficultyLevel = 1.0f; // Expert
             enhancedAI->SetDifficulty(difficultyLevel);
+            DrawText("EXPERT MODE SELECTED", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 + 50, 20, RED);
         }
         break;
 

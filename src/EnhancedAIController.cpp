@@ -303,5 +303,18 @@ bool EnhancedAIController::IsOffStage(Vector2 position, const std::vector<Platfo
                           position.y < GameConfig::BLAST_ZONE_TOP + 100 ||
                           position.y > GameConfig::BLAST_ZONE_BOTTOM - 100);
 
-    return !aboveMainStage || nearBlastzone;
+    // Fix: Only consider a character off-stage if they're not above the platform AND are far enough away horizontally
+    // This prevents the AI from thinking it's off-stage when it's just in the air
+    bool significantlyOffStage = !aboveMainStage && 
+                              (position.x < mainPlatform.x - 75 ||
+                               position.x > mainPlatform.x + mainPlatform.width + 75);
+
+    // Consider danger zone near blast zone
+    bool inDangerZone = position.x < GameConfig::BLAST_ZONE_LEFT + 60 ||
+                      position.x > GameConfig::BLAST_ZONE_RIGHT - 60 ||
+                      position.y < GameConfig::BLAST_ZONE_TOP + 60 ||
+                      position.y > GameConfig::BLAST_ZONE_BOTTOM - 60;
+
+    // Only consider off stage if significantly off stage OR in real danger near blastzones
+    return significantlyOffStage || inDangerZone;
 }

@@ -635,115 +635,334 @@ void AIExecutor::ExecuteRecoverBehavior(Character* enemy, const std::vector<Plat
 
     float absDistanceX = std::fabs(distanceX);
 
-    // Calculate optimal recovery target point
-    float targetX = mainPlatform.x + mainPlatform.width / 2;
-    float targetY = mainPlatform.y - 20; // Above platform
+    // Calculate optimal recovery target point (aim for the center or nearest edge)
+    float targetX;
+    // Difficulty affects where we aim
+    if (config.difficulty.recoverySkill < 0.4f) {
+        // Low skill always aims for center - sometimes overshoots
+        targetX = mainPlatform.x + mainPlatform.width / 2;
+        
+        // Random targeting errors for low skill
+        if (GetRandomValue(0, 100) > 70) {
+            targetX += GetRandomValue(-100, 100);
+        }
+    } else {
+        // Higher skill intelligently picks closest point
+        if (enemy->physics.position.x < mainPlatform.x) {
+            targetX = mainPlatform.x + 50; // Aim just inside the left edge
+        }
+        else if (enemy->physics.position.x > mainPlatform.x + mainPlatform.width) {
+            targetX = mainPlatform.x + mainPlatform.width - 50; // Aim just inside the right edge
+        }
+        else {
+            targetX = mainPlatform.x + mainPlatform.width / 2;
+        }
+    }
+    
+    float targetY = mainPlatform.y - 20; // Just above platform
+
+    // First check - if we're actually ON the main platform already, don't try to recover
+    bool onMainPlatform = enemy->physics.position.x >= mainPlatform.x && 
+                         enemy->physics.position.x <= mainPlatform.x + mainPlatform.width &&
+                         std::abs(enemy->physics.position.y - mainPlatform.y) < 10;
+                         
+    if (onMainPlatform) {
+        // We're already on the main platform, don't need recovery actions
+        // Just make sure we're not moving off it
+        if (enemy->physics.position.x < mainPlatform.x + 50) {
+            enemy->moveRight();
+        } else if (enemy->physics.position.x > mainPlatform.x + mainPlatform.width - 50) {
+            enemy->moveLeft();
+        }
+        return;
+    }
 
     // Calculate angle for recovery
     float recoveryAngle = CalculateRecoveryAngle(enemy, platforms);
 
     // Extreme danger - low recovery has higher priority
     bool dangerouslyLow = enemy->physics.position.y > BLAST_ZONE_BOTTOM - 200;
+    bool dangerouslyHorizontal = enemy->physics.position.x < GameConfig::BLAST_ZONE_LEFT + 150 ||
+                             enemy->physics.position.x > GameConfig::BLAST_ZONE_RIGHT - 150;
 
     // First priority: get horizontal alignment with stage
-    if (enemy->physics.position.x < targetX - 100)
+    if (enemy->physics.position.x < targetX - 50)
     {
         enemy->moveRight();
     }
-    else if (enemy->physics.position.x > targetX + 100)
+    else if (enemy->physics.position.x > targetX + 50)
     {
         enemy->moveLeft();
     }
 
-    // If below stage and has double jump, use it when close enough
-    if (enemy->physics.position.y > targetY + 100 && absDistanceX < 350 &&
+    // Low skill AI may make input errors based on executionPrecision
+    if (config.difficulty.executionPrecision < 0.5f && GetRandomValue(0, 100) > 80) {
+        // Sometimes moves in wrong direction
+        if (GetRandomValue(0, 1) == 0) {
+            enemy->moveLeft();
+        } else {
+            enemy->moveRight();
+        }
+    }
+
+    // If below stage and has double jump, use it when appropriate
+    if (enemy->physics.position.y > targetY && 
         enemy->stateManager.hasDoubleJump && !enemy->stateManager.isJumping)
     {
-        // For optimal recovery, sometimes delay the double jump
-        if (dangerouslyLow || GetRandomValue(0, 100) < 70 * config.difficulty.executionPrecision)
-        {
+        // Double jump timing depends on skill
+        bool shouldJump = false;
+        
+        // Low skill wastes double jump immediately
+        if (config.difficulty.recoverySkill < 0.4f) {
+            shouldJump = true;
+        }
+        // Medium skill jumps when in danger
+        else if (config.difficulty.recoverySkill < 0.7f) {
+            if (dangerouslyLow || dangerouslyHorizontal) {
+                shouldJump = true;
+            }
+        }
+        // High skill uses double jump strategically
+        else {
+            // Use double jump immediately if in serious danger
+            if (dangerouslyLow || dangerouslyHorizontal) {
+                shouldJump = true;
+            }
+            // Otherwise, be more strategic about jump timing
+            else if (std::fabs(enemy->physics.position.x - targetX) < 200) {
+                // We're close horizontally, safe to double jump
+                shouldJump = true;
+            }
+        }
+        
+        // Input errors for low skill
+        if (config.difficulty.executionPrecision < 0.3f && GetRandomValue(0, 100) > 70) {
+            // Sometimes fails to input jump
+            shouldJump = false;
+        }
+        
+        if (shouldJump) {
             enemy->jump(); // This will use double jump if needed
         }
     }
 
     // Use up special for recovery, but save it for the right moment
-    if (enemy->physics.position.y > targetY + 50 &&
-        absDistanceX < 300 && !enemy->stateManager.isJumping && !enemy->stateManager.hasDoubleJump &&
+    if (enemy->physics.position.y > targetY &&
+        !enemy->stateManager.isJumping && !enemy->stateManager.hasDoubleJump &&
         enemy->stateManager.specialUpCD.current <= 0)
     {
-        // Optimal timing based on distance and angle
-        if (dangerouslyLow ||
-            (std::fabs(enemy->physics.position.x - targetX) < 150 && std::fabs(recoveryAngle) < 0.5f))
-        {
+        // Up special timing depends on skill
+        bool shouldUpSpecial = false;
+        
+        // Low skill uses up special randomly or too early
+        if (config.difficulty.recoverySkill < 0.4f) {
+            shouldUpSpecial = (GetRandomValue(0, 100) > 50);
+        }
+        // Medium skill uses up special when in danger
+        else if (config.difficulty.recoverySkill < 0.7f) {
+            if (dangerouslyLow || dangerouslyHorizontal) {
+                shouldUpSpecial = true;
+            }
+        }
+        // High skill uses up special optimally
+        else {
+            // Use up special immediately if in serious danger
+            if (dangerouslyLow || dangerouslyHorizontal) {
+                shouldUpSpecial = true;
+            }
+            // Otherwise, be more strategic about up special timing
+            else if (std::fabs(enemy->physics.position.x - targetX) < 150) {
+                // We're pretty close horizontally, good time for up special
+                shouldUpSpecial = true;
+            }
+        }
+        
+        // Input errors for low skill
+        if (config.difficulty.executionPrecision < 0.3f && GetRandomValue(0, 100) > 70) {
+            // Sometimes fails to input special
+            shouldUpSpecial = false;
+        }
+        
+        if (shouldUpSpecial) {
             enemy->upSpecial();
         }
     }
 
-    // Air dodge as a recovery mixup or extension
-    if (enemy->physics.position.y > targetY + 50 &&
-        absDistanceX < 250 && !enemy->stateManager.isJumping && !enemy->stateManager.hasDoubleJump &&
-        enemy->stateManager.specialUpCD.current > 0 && !enemy->stateManager.isDodging &&
-        GetRandomValue(0, 100) > 30)
+    // Air dodge as a recovery mixup or extension - only for higher skill AI
+    if (enemy->physics.position.y > targetY && 
+        std::fabs(enemy->physics.position.x - targetX) < 200 &&
+        !enemy->stateManager.isJumping && !enemy->stateManager.hasDoubleJump &&
+        enemy->stateManager.specialUpCD.current > 0 && !enemy->stateManager.isDodging)
     {
-        // Calculate best air dodge angle for recovery
-        float dodgeX = (enemy->physics.position.x < targetX) ? 0.8f : -0.8f;
-        float dodgeY = -0.6f;
-        enemy->airDodge(dodgeX, dodgeY);
+        // Only high skill AI uses air dodge effectively for recovery
+        if (config.difficulty.techSkill > 0.5f && GetRandomValue(0, 100) > 50) {
+            // Calculate best air dodge angle for recovery - more precise
+            float dodgeX = (enemy->physics.position.x < targetX) ? 0.7f : -0.7f;
+            // Adjust vertical component based on how far down we are
+            float dodgeY = -0.7f;
+            
+            // If dangerously low, prioritize upward airdodge
+            if (dangerouslyLow) {
+                dodgeY = -0.9f;
+                dodgeX *= 0.4f; // Reduce horizontal component
+            }
+            
+            // Less skilled AI might use suboptimal angles
+            if (config.difficulty.recoverySkill < 0.7f) {
+                dodgeX += (GetRandomValue(-30, 30) / 100.0f);
+                dodgeY += (GetRandomValue(-20, 20) / 100.0f);
+            }
+            
+            enemy->airDodge(dodgeX, dodgeY);
+        }
     }
 
     // If close to danger zone, prioritize getting back
-    if (enemy->physics.position.y > BLAST_ZONE_BOTTOM - 150)
+    if (dangerouslyLow || dangerouslyHorizontal)
     {
-        // Maximum effort to recover - mash jump and up special
+        // Maximum effort to recover
         if (!enemy->stateManager.isJumping && enemy->stateManager.hasDoubleJump)
         {
-            enemy->jump();
+            // Low skill might panic and miss inputs
+            if (config.difficulty.executionPrecision < 0.3f && GetRandomValue(0, 100) > 60) {
+                // Do nothing - panicking
+            } else {
+                enemy->jump();
+            }
         }
         else if (enemy->stateManager.specialUpCD.current <= 0)
         {
-            enemy->upSpecial();
+            // Low skill might panic and miss inputs
+            if (config.difficulty.executionPrecision < 0.3f && GetRandomValue(0, 100) > 60) {
+                // Do nothing - panicking
+            } else {
+                enemy->upSpecial();
+            }
         }
     }
 }
 
 void AIExecutor::ExecuteRetreatBehavior(Character* enemy, Character* player, float distanceX, float distanceY)
 {
-    // Move away from player but keep facing them for defense
-    if (distanceX > 0)
-    {
-        enemy->moveLeft();
-        enemy->stateManager.isFacingRight = true; // Still face player while retreating
+    // Default safe boundaries (fallback if platforms not set)
+    float leftBoundary = 150;  // Safe distance from left edge
+    float rightBoundary = GameConfig::SCREEN_WIDTH - 150;  // Safe distance from right edge
+    
+    // Get stage boundaries from platforms if available
+    if (platforms && !platforms->empty()) {
+        // Find the main platform (usually the largest one at the bottom)
+        Rectangle mainPlatform = (*platforms)[0].rect;
+        float largestArea = mainPlatform.width * mainPlatform.height;
+
+        for (size_t i = 1; i < platforms->size(); i++) {
+            float area = (*platforms)[i].rect.width * (*platforms)[i].rect.height;
+            if (area > largestArea) {
+                mainPlatform = (*platforms)[i].rect;
+                largestArea = area;
+            }
+        }
+        
+        // Calculate safe retreat boundaries with margin
+        leftBoundary = mainPlatform.x + 75;  // Increased margin for safety
+        rightBoundary = mainPlatform.x + mainPlatform.width - 75;
     }
-    else
-    {
-        enemy->moveRight();
-        enemy->stateManager.isFacingRight = false; // Still face player while retreating
+    
+    // Check if we're at stage boundary
+    bool atLeftBoundary = enemy->physics.position.x <= leftBoundary;
+    bool atRightBoundary = enemy->physics.position.x >= rightBoundary;
+    
+    // Move away from player but keep facing them for defense
+    // AND ensure we don't retreat off the stage
+    if (distanceX > 0) {
+        // Player is to our right, so retreat left
+        if (!atLeftBoundary) {
+            enemy->moveLeft();
+            enemy->stateManager.isFacingRight = true; // Still face player while retreating
+        } else {
+            // At left boundary, stop retreating and either shield or counter-attack
+            if (std::fabs(distanceX) < 150) {
+                // Player is close, shield
+                enemy->shield();
+            } else {
+                // Player is far enough, use projectile or prepare to counterattack
+                if (GetRandomValue(0, 1) == 0) {
+                    enemy->neutralSpecial();
+                } else {
+                    // Ready position, no action
+                }
+            }
+        }
+    } else {
+        // Player is to our left, so retreat right
+        if (!atRightBoundary) {
+            enemy->moveRight();
+            enemy->stateManager.isFacingRight = false; // Still face player while retreating
+        } else {
+            // At right boundary, stop retreating and either shield or counter-attack
+            if (std::fabs(distanceX) < 150) {
+                // Player is close, shield
+                enemy->shield();
+            } else {
+                // Player is far enough, use projectile or prepare to counterattack
+                if (GetRandomValue(0, 1) == 0) {
+                    enemy->neutralSpecial();
+                } else {
+                    // Ready position, no action
+                }
+            }
+        }
     }
 
-    // Shield if player approaches too quickly
-    if (std::fabs(distanceX) < 100 && player->physics.velocity.x != 0 &&
+    // Shield if player approaches too quickly or if we're cornered
+    if ((std::fabs(distanceX) < 100 && player->physics.velocity.x != 0 &&
         ((distanceX > 0 && player->physics.velocity.x > 3) ||
-            (distanceX < 0 && player->physics.velocity.x < -3)))
+         (distanceX < 0 && player->physics.velocity.x < -3))) ||
+        (atLeftBoundary && distanceX < 0) || (atRightBoundary && distanceX > 0)) 
     {
         enemy->shield();
     }
 
-    // Jump to platform to reset position
-    if (GetRandomValue(0, 100) > 50)
+    // Jump to platform to reset position, but only if not near edge and player is close
+    bool nearEdge = atLeftBoundary || atRightBoundary || 
+                   (enemy->physics.position.x < leftBoundary + 60) || 
+                   (enemy->physics.position.x > rightBoundary - 60);
+    
+    if (!nearEdge && std::fabs(distanceX) < 150 && GetRandomValue(0, 100) > 80) // Greatly reduced frequency of jumps
     {
         enemy->jump();
     }
 
-    // Use projectiles to keep player away
-    if (GetRandomValue(0, 100) > 40)
+    // Use projectiles to keep player away, especially if at boundary
+    bool shouldUseProjectile = (atLeftBoundary && distanceX < 0) || 
+                              (atRightBoundary && distanceX > 0) ||
+                              (std::fabs(distanceX) > 100 && GetRandomValue(0, 100) > 60);
+                              
+    if (shouldUseProjectile) 
     {
         enemy->neutralSpecial();
     }
 
-    // Fast fall when above a platform
-    if (enemy->physics.velocity.y > 0 && enemy->stateManager.state == FALLING)
+    // Fast fall only when above a safe platform area
+    bool aboveSafePlatform = enemy->physics.position.x >= leftBoundary + 50 && 
+                            enemy->physics.position.x <= rightBoundary - 50;
+                            
+    if (enemy->physics.velocity.y > 0 && enemy->stateManager.state == FALLING && aboveSafePlatform)
     {
         enemy->fastFall();
+    }
+    
+    // Spot dodge if player is very close and attacking
+    if (std::fabs(distanceX) < 60 && player->stateManager.isAttacking) {
+        enemy->spotDodge();
+    }
+    
+    // If near edge and player is approaching, consider counterattack
+    if ((atLeftBoundary || atRightBoundary) && 
+        std::fabs(distanceX) < 120 && std::fabs(distanceX) > 50 &&
+        GetRandomValue(0, 100) > 70)
+    {
+        // Choose a quick counterattack when cornered
+        enemy->jab();
     }
 }
 

@@ -97,7 +97,10 @@ void Character::resetAttackState() {
     stateManager.currentAttack = NONE;
     stateManager.attackDuration = 0;
     stateManager.attackFrame = 0;
+
+    // Clear all attacks
     attacks.clear();
+
     stateManager.canAttack = true;
 }
 
@@ -497,6 +500,16 @@ void Character::update(std::vector<Platform>& platforms) {
         startDeathAnimation();
     }
 
+    // Always ensure attack positions are updated if we have active attacks
+    if (!attacks.empty()) {
+        updateAttackPositions();
+    }
+
+    // IMPORTANT FIX: End attack if it's gone past its duration
+    if (stateManager.isAttacking && stateManager.attackFrame >= stateManager.attackDuration) {
+        resetAttackState();
+    }
+
     // Update hit effects
     for (int i = 0; i < hitEffects.size(); i++) {
         if (!hitEffects[i].update()) {
@@ -720,7 +733,15 @@ void Character::neutralSpecial() {
         float hitboxY = physics.position.y - hitboxHeight / 2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 8.0f, 3.0f, 0.1f, stateManager.isFacingRight ? 0.0f : 180.0f, 10, 10));
+        
+        // Create a projectile with velocity and set to destroy on hit
+        Vector2 projectileVelocity = {stateManager.isFacingRight ? 12.0f : -12.0f, 0.0f};
+        
+        // Create the projectile with the PROJECTILE type explicitly
+        AttackBox projectile(hitboxRect, 8.0f, 3.0f, 0.1f, stateManager.isFacingRight ? 0.0f : 180.0f, 15, 60, 
+                            projectileVelocity, true);
+        projectile.type = AttackBox::PROJECTILE;
+        attacks.push_back(projectile);
     }
 }
 
@@ -915,14 +936,22 @@ bool Character::checkHit(Character& other) {
     // Skip if the other character is invincible, dying, or exploding
     if (other.stateManager.isInvincible || other.stateManager.isDying || other.stateManager.isExploding) return false;
 
+    bool hitOccurred = false;
     // Check each attack hitbox
-    for (auto& attack : attacks) {
+    for (auto it = attacks.begin(); it != attacks.end(); ) {
+        auto& attack = *it;
+
         // Skip if attack is not active
-        if (!attack.isActive) continue;
-            
+        if (!attack.isActive) {
+            ++it;
+            continue;
+        }
+
         Rectangle otherHurtbox = other.getHurtbox();
 
         if (CheckCollisionRecs(attack.rect, otherHurtbox)) {
+            hitOccurred = true;
+
             // Handle different hitbox types
             switch (attack.type) {
                 case AttackBox::GRAB:
@@ -942,6 +971,7 @@ bool Character::checkHit(Character& other) {
                         other.stateManager.isHitstun = true;
                         other.stateManager.hitstunFrames = 1; // Keep in hitstun while grabbed
                     }
+                    ++it; // Move to next attack
                     break;
 
                 case AttackBox::NORMAL:
@@ -990,14 +1020,25 @@ bool Character::checkHit(Character& other) {
                         };
                         createHitEffect(hitPos);
                     }
+
+                    // Handle projectile destruction
+                    if (attack.type == AttackBox::PROJECTILE && attack.destroyOnHit) {
+                        attack.isActive = false;
+                        // Don't advance iterator since we'll be removing this element
+                        it = attacks.erase(it);
+                    } else {
+                        // For non-projectiles or projectiles that don't destroy on hit
+                        ++it;
+                    }
                     break;
             }
-
-            return true;
+        } else {
+            // Move to next attack if no collision
+            ++it;
         }
     }
 
-    return false;
+    return hitOccurred;
 }
 
 void Character::applyDamage(float damage) {
@@ -1009,7 +1050,7 @@ void Character::applyDamage(float damage) {
 
 void Character::applyKnockback(float damage, float baseKnockback, float knockbackScaling, 
                                float directionX, float directionY) {
-    // Calculate knockback based on damage and scaling
+    // THIS IS CORRECT: Calculate knockback based on damage and scaling
     float damageMultiplier = 1.0f + (damagePercent * GameConfig::DAMAGE_SCALING);
     float knockbackMagnitude = baseKnockback + (knockbackScaling * damageMultiplier);
 
@@ -1140,31 +1181,52 @@ void Character::respawn(Vector2 spawnPoint) {
 
 // Attack position updates
 void Character::updateAttackPositions() {
-    // Remove expired or inactive attacks
-    attacks.erase(
-        std::remove_if(attacks.begin(), attacks.end(), 
-                      [](const AttackBox& attack) { return !attack.isActive; }),
-        attacks.end());
-    
-    // Update positions of remaining attacks
-    for (auto& attack : attacks) {
-        // Skip projectiles as they move independently
+    // Process each attack box
+    for (auto it = attacks.begin(); it != attacks.end(); ) {
+        auto& attack = *it;
+        
+        // For projectiles - update independent movement
         if (attack.type == AttackBox::PROJECTILE) {
-            // Just update the projectile state
-            attack.update();
+            bool isActive = attack.update();
+            
+            // Check if projectile went off-screen
+            bool offScreen = attack.rect.x < GameConfig::BLAST_ZONE_LEFT ||
+                            attack.rect.x > GameConfig::BLAST_ZONE_RIGHT ||
+                            attack.rect.y < GameConfig::BLAST_ZONE_TOP ||
+                            attack.rect.y > GameConfig::BLAST_ZONE_BOTTOM;
+
+            if (!isActive || offScreen) {
+                // Remove expired or off-screen projectiles
+                it = attacks.erase(it);
+            } else {
+                ++it;
+            }
             continue;
         }
-        
-        // Position the attack box relative to the character
-        float offsetX = stateManager.isFacingRight ? 1.0f : -1.0f;
-        float boxCenterX = physics.position.x + (attack.rect.width / 2) * offsetX;
 
-        // Adjust based on attack box original position
-        attack.rect.x = boxCenterX - (attack.rect.width / 2);
-        attack.rect.y = physics.position.y - (attack.rect.height / 2);
+        // For normal attacks - update position relative to character
+        float offsetX = stateManager.isFacingRight ? 1.0f : -1.0f;
+
+        // For non-projectile attacks, reposition them relative to the character
+        if (attack.type != AttackBox::PROJECTILE) {
+            // Adjust based on attack box original position
+            float relativeX = attack.rect.width / 2.0f * offsetX;
+            float boxCenterX = physics.position.x + relativeX;
+
+            // Update position
+            attack.rect.x = boxCenterX - (attack.rect.width / 2.0f);
+            attack.rect.y = physics.position.y - (attack.rect.height / 2.0f);
+        }
+
+        // Update duration tracking for all attacks
+        bool isActive = attack.update();
         
-        // Update attack state
-        attack.update();
+        if (!isActive) {
+            // Remove expired attacks
+            it = attacks.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 

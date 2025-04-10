@@ -30,12 +30,20 @@ public:
     // Apply horizontal friction (different on ground vs. air)
     void applyFriction(bool onGround) {
         if (onGround) {
-            velocity.x *= 0.9f;  // More friction on ground
-            if (fabs(velocity.x) < 0.1f) {
+            // FIXED: Remove any scaling with damage percentage
+            // Original code might have been:
+            // float frictionFactor = BASE_FRICTION_FACTOR * (1.0f - (characterDamage / MAX_DAMAGE));
+
+            velocity.x *= GameConfig::GROUND_FRICTION;
+
+            // If velocity is very small, just stop completely to prevent sliding
+            if (std::fabs(velocity.x) < 0.1f) {
                 velocity.x = 0.0f;
             }
         } else {
-            velocity.x *= 0.98f;  // Less friction in air
+            // While airborne, apply a much smaller amount of air resistance
+            const float AIR_RESISTANCE = 0.98f;
+            velocity.x *= AIR_RESISTANCE;
         }
     }
     
