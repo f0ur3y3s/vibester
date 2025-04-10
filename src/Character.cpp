@@ -100,6 +100,117 @@ Character::Character(float x, float y, float w, float h, float spd, Color col, s
     deathFrame = 0;
     deathVelocity = {0, 0};
     deathPosition = {0, 0};
+    isExploding = false;
+    explosionFrame = 0;
+    explosionDuration = 60;
+}
+
+void Character::checkForExplosion() {
+    // Check if damage threshold reached for explosion
+    if (damagePercent >= 100.0f && !isDying && !isExploding) {
+        startExplosionAnimation();
+    }
+}
+
+void Character::startExplosionAnimation() {
+    isExploding = true;
+    explosionFrame = 0;
+    explosionDuration = 60; // 1 second explosion
+    explosionParticles.clear();
+
+    // Use the enhanced explosion particle system
+    std::vector<Particle> massiveExplosion = createMassiveExplosionParticles(position, 150, color);
+    explosionParticles.insert(explosionParticles.end(), massiveExplosion.begin(), massiveExplosion.end());
+
+    // Reduce stock after explosion
+    stocks--;
+
+    // Reset damage after explosion
+    damagePercent = 0;
+
+    // Apply a dramatic screen shake effect and flash
+    // (These visual effects are handled in Game.cpp)
+}
+
+void Character::updateExplosionAnimation() {
+    explosionFrame++;
+
+    // Update existing explosion particles
+    for (int i = 0; i < explosionParticles.size(); i++) {
+        if (!explosionParticles[i].update()) {
+            explosionParticles.erase(explosionParticles.begin() + i);
+            i--;
+        }
+    }
+
+    // Add new particles during the initial phase of explosion
+    if (explosionFrame < explosionDuration / 2) {
+        int particlesToAdd = 5;
+        for (int i = 0; i < particlesToAdd; i++) {
+            float angle = GetRandomValue(0, 360) * DEG2RAD;
+            float speed = GetRandomValue(3, 10);
+            Vector2 velocity = {
+                cosf(angle) * speed,
+                sinf(angle) * speed
+            };
+
+            float size = GetRandomValue(2, 8);
+            int lifespan = GetRandomValue(20, 60);
+
+            // Create more colorful particles for secondary explosion
+            Color particleColor;
+            int colorChoice = GetRandomValue(0, 3);
+            switch (colorChoice) {
+                case 0: particleColor = RED; break;
+                case 1: particleColor = ORANGE; break;
+                case 2: particleColor = YELLOW; break;
+                case 3: particleColor = WHITE; break;
+            }
+
+            explosionParticles.push_back(Particle(position, velocity, size, lifespan, particleColor));
+        }
+    }
+
+    // End explosion animation
+    if (explosionFrame >= explosionDuration) {
+        isExploding = false;
+
+        // Respawn after explosion
+        if (stocks > 0) {
+            // Reset for respawn
+            damagePercent = 0;
+            velocity = {0, 0};
+            isInvincible = true;
+            invincibilityFrames = 120; // 2 seconds of invincibility
+
+            // Respawn at center top
+            position.x = SCREEN_WIDTH / 2;
+            position.y = 100;
+
+            changeState(FALLING);
+        }
+    }
+}
+
+void Character::drawExplosionAnimation() {
+    // Draw explosion particles
+    for (auto& particle : explosionParticles) {
+        particle.draw();
+    }
+
+    // Draw shockwave effect
+    float shockwaveRadius = explosionFrame * 8.0f;
+    float alpha = 255 * (1.0f - (float)explosionFrame / explosionDuration);
+    Color shockwaveColor = {255, 200, 50, (unsigned char)alpha};
+
+    DrawCircleLines(position.x, position.y, shockwaveRadius, shockwaveColor);
+    DrawCircleLines(position.x, position.y, shockwaveRadius * 0.7f, shockwaveColor);
+
+    // Draw flash effect in early frames
+    if (explosionFrame < 10) {
+        Color flashColor = {255, 255, 255, (unsigned char)(255 * (1.0f - explosionFrame / 10.0f))};
+        DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, flashColor);
+    }
 }
 
 Rectangle Character::getRect() {
@@ -115,6 +226,14 @@ Rectangle Character::getHurtbox() {
 }
 
 void Character::update(std::vector<Platform>& platforms) {
+    checkForExplosion();
+
+    // Skip normal updates if exploding
+    if (isExploding) {
+        updateExplosionAnimation();
+        return;
+    }
+
     // Skip updates if dying
     if (isDying) {
         updateDeathAnimation();
@@ -578,6 +697,12 @@ void Character::changeState(CharacterState newState) {
 }
 
 void Character::draw() {
+    // Skip normal drawing if exploding
+    if (isExploding) {
+        drawExplosionAnimation();
+        return;
+    }
+
     // Skip normal drawing if dying
     if (isDying) {
         drawDeathAnimation();

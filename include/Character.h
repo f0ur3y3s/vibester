@@ -1,6 +1,8 @@
 #ifndef CHARACTER_H
 #define CHARACTER_H
 
+#include <Particle.h>
+
 #include "raylib.h"
 #include "Platform.h"
 #include "AttackBox.h"
@@ -151,6 +153,14 @@ public:
     // Constructor
     Character(float x, float y, float w, float h, float spd, Color col, std::string n);
 
+    void checkForExplosion();
+
+    void startExplosionAnimation();
+
+    void updateExplosionAnimation();
+
+    void drawExplosionAnimation();
+
     // Basic methods
     Rectangle getRect();
     Rectangle getHurtbox();  // Possibly smaller than character rect
@@ -164,6 +174,10 @@ public:
     void updateDeathAnimation();
     void drawDeathAnimation();
     void respawn(Vector2 spawnPoint);
+    bool isExploding;
+    int explosionFrame;
+    int explosionDuration;
+    std::vector<Particle> explosionParticles;
 
     // State management
     void changeState(CharacterState newState);
