@@ -822,7 +822,14 @@ void Character::shield() {
         shieldHealth > 0 && !isDodging) {
         changeState(SHIELDING);
         isShielding = true;
-    }
+
+        // Immobilize the character
+        velocity.x = 0;
+        velocity.y = 0;
+
+        // Shield shrinks as it takes damage
+        // (Already implemented in draw function)
+        }
 }
 
 void Character::releaseShield() {
@@ -836,8 +843,16 @@ void Character::spotDodge() {
     if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
         changeState(DODGING);
         dodgeFrames = 0;
+        isDodging = true;
+
+        // Stop movement during spot dodge
         velocity.x = 0;
         velocity.y = 0;
+
+        // Shorter duration than rolls
+        attackDuration = SPOT_DODGE_FRAMES;
+
+        // Quick invincibility but can't move
     }
 }
 
@@ -845,8 +860,16 @@ void Character::forwardDodge() {
     if (state != JUMPING && state != FALLING && dodgeCD.current <= 0) {
         changeState(DODGING);
         dodgeFrames = 0;
+        isDodging = true;
+
+        // Move in facing direction
         velocity.x = isFacingRight ? speed * 1.5f : -speed * 1.5f;
         velocity.y = 0;
+
+        // Longer duration than spot dodge
+        attackDuration = ROLL_DODGE_FRAMES;
+
+        // Movement with invincibility, but fixed path and end lag
     }
 }
 
@@ -863,6 +886,7 @@ void Character::airDodge(float dirX, float dirY) {
     if ((state == JUMPING || state == FALLING) && dodgeCD.current <= 0) {
         changeState(DODGING);
         dodgeFrames = 0;
+        isDodging = true;
 
         // Normalize direction and apply speed
         float length = sqrtf(dirX * dirX + dirY * dirY);
@@ -870,6 +894,12 @@ void Character::airDodge(float dirX, float dirY) {
             velocity.x = (dirX / length) * speed * 1.5f;
             velocity.y = (dirY / length) * speed * 1.5f;
         }
+
+        // Longest dodge with highest end lag
+        attackDuration = AIR_DODGE_FRAMES;
+
+        // Special landing penalty if air dodging
+        // (would be implemented in the landing code)
     }
 }
 
@@ -880,17 +910,20 @@ void Character::jab() {
         resetAttackState();
         isAttacking = true;
         currentAttack = JAB;
-        attackDuration = 20;
+        attackDuration = 15; // Very short duration
         changeState(ATTACKING);
 
-        // Create a simple jab hitbox
-        float hitboxWidth = width * 0.8f;
+        // Small hitbox with minimal knockback
+        float hitboxWidth = width * 0.7f;
         float hitboxHeight = height * 0.5f;
         float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
         float hitboxY = position.y - hitboxHeight/2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 3.0f, 2.0f, 0.1f, isFacingRight ? 0.0f : 180.0f, 10, 10));
+        attacks.push_back(AttackBox(hitboxRect, 3.0f, 1.5f, 0.05f, isFacingRight ? 0.0f : 180.0f, 5, 5));
+
+        // Reduced end lag - can act again sooner
+        canAttack = true;
     }
 }
 
@@ -899,17 +932,40 @@ void Character::forwardTilt() {
         resetAttackState();
         isAttacking = true;
         currentAttack = FORWARD_TILT;
-        attackDuration = 30;
+        attackDuration = 28; // Moderate duration
         changeState(ATTACKING);
 
-        // Forward tilt hitbox (stronger than jab, more range)
+        // Good range hitbox
         float hitboxWidth = width * 1.2f;
         float hitboxHeight = height * 0.6f;
         float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
         float hitboxY = position.y - hitboxHeight/2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 8.0f, 4.0f, 0.15f, isFacingRight ? 30.0f : 150.0f, 15, 15));
+        attacks.push_back(AttackBox(hitboxRect, 8.0f, 4.0f, 0.15f, isFacingRight ? 30.0f : 150.0f, 15, 12));
+    }
+}
+
+void Character::downTilt() {
+    if (canAttack && state != JUMPING && state != FALLING) {
+        resetAttackState();
+        isAttacking = true;
+        currentAttack = DOWN_TILT;
+        attackDuration = 22;
+        changeState(ATTACKING);
+
+        // Low-profile hitbox
+        float hitboxWidth = width * 1.3f;
+        float hitboxHeight = height * 0.3f; // Very low profile
+        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
+        float hitboxY = position.y + height/2 - hitboxHeight;
+
+        // More horizontal launch angle - good for combos
+        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+        attacks.push_back(AttackBox(hitboxRect, 5.0f, 2.5f, 0.1f, isFacingRight ? 15.0f : 165.0f, 10, 8));
+
+        // Add slight movement to help with combos
+        velocity.x = isFacingRight ? speed * 0.3f : -speed * 0.3f;
     }
 }
 
@@ -921,33 +977,17 @@ void Character::upTilt() {
         attackDuration = 25;
         changeState(ATTACKING);
 
-        // Upward-hitting hitbox
-        float hitboxWidth = width * 0.9f;
-        float hitboxHeight = height * 1.2f;
+        // Tall, narrow hitbox above character
+        float hitboxWidth = width * 0.7f;
+        float hitboxHeight = height * 1.3f;
         float hitboxX = position.x - hitboxWidth/2;
         float hitboxY = position.y - hitboxHeight;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 7.0f, 3.0f, 0.2f, 90.0f, 12, 12));
-    }
-}
+        attacks.push_back(AttackBox(hitboxRect, 7.0f, 3.0f, 0.15f, 80.0f, 12, 12));
 
-void Character::downTilt() {
-    if (canAttack && state != JUMPING && state != FALLING) {
-        resetAttackState();
-        isAttacking = true;
-        currentAttack = DOWN_TILT;
-        attackDuration = 20;
-        changeState(ATTACKING);
-
-        // Low-hitting hitbox
-        float hitboxWidth = width * 1.3f;
-        float hitboxHeight = height * 0.4f;
-        float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
-        float hitboxY = position.y + height/2 - hitboxHeight;
-
-        Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 5.0f, 2.0f, 0.1f, 20.0f, 8, 10));
+        // Brief vulnerability on sides during animation
+        // (implemented through narrow hitbox and animation duration)
     }
 }
 
@@ -956,13 +996,13 @@ void Character::dashAttack() {
         resetAttackState();
         isAttacking = true;
         currentAttack = DASH_ATTACK;
-        attackDuration = 35;
+        attackDuration = 35; // Longer commitment
         changeState(ATTACKING);
 
-        // Add momentum to dash attack
-        velocity.x = isFacingRight ? speed * 1.5f : -speed * 1.5f;
+        // Add significant momentum
+        velocity.x = isFacingRight ? speed * 2.0f : -speed * 2.0f;
 
-        // Dash attack hitbox
+        // Forward-moving hitbox
         float hitboxWidth = width * 1.1f;
         float hitboxHeight = height * 0.8f;
         float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
@@ -970,6 +1010,9 @@ void Character::dashAttack() {
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
         attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.15f, isFacingRight ? 40.0f : 140.0f, 20, 20));
+
+        // High endlag - vulnerable if missed or shielded
+        canAttack = false; // Force full animation before next action
     }
 }
 
@@ -979,19 +1022,21 @@ void Character::forwardSmash(float chargeTime) {
         resetAttackState();
         isAttacking = true;
         currentAttack = FORWARD_SMASH;
-        attackDuration = 40;
+        attackDuration = 45; // Very high commitment
         changeState(ATTACKING);
 
         // Charge multiplier (1.0 to 1.5)
         float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
 
-        // Strong forward-hitting hitbox
+        // Large, strong forward hitbox
         float hitboxWidth = width * 1.5f;
         float hitboxHeight = height * 0.7f;
         float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
         float hitboxY = position.y - hitboxHeight/2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+
+        // High knockback, scaling with charge
         attacks.push_back(AttackBox(
             hitboxRect,
             15.0f * chargeMultiplier,
@@ -1001,6 +1046,9 @@ void Character::forwardSmash(float chargeTime) {
             25,
             15
         ));
+
+        // Vulnerable during endlag - major disadvantage if missed
+        velocity.x *= 0.2f; // Almost stop movement - committal
     }
 }
 
@@ -1009,19 +1057,21 @@ void Character::upSmash(float chargeTime) {
         resetAttackState();
         isAttacking = true;
         currentAttack = UP_SMASH;
-        attackDuration = 35;
+        attackDuration = 40;
         changeState(ATTACKING);
 
         // Charge multiplier (1.0 to 1.5)
         float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
 
-        // Strong upward-hitting hitbox
-        float hitboxWidth = width * 1.0f;
-        float hitboxHeight = height * 1.5f;
+        // Tall vertical hitbox
+        float hitboxWidth = width * 0.8f;
+        float hitboxHeight = height * 1.8f;
         float hitboxX = position.x - hitboxWidth/2;
         float hitboxY = position.y - hitboxHeight;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
+
+        // Strong vertical knockback
         attacks.push_back(AttackBox(
             hitboxRect,
             14.0f * chargeMultiplier,
@@ -1031,6 +1081,8 @@ void Character::upSmash(float chargeTime) {
             20,
             15
         ));
+
+        // Vulnerable on sides - blind spot weakness
     }
 }
 
@@ -1039,14 +1091,14 @@ void Character::downSmash(float chargeTime) {
         resetAttackState();
         isAttacking = true;
         currentAttack = DOWN_SMASH;
-        attackDuration = 35;
+        attackDuration = 38;
         changeState(ATTACKING);
 
         // Charge multiplier (1.0 to 1.5)
         float chargeMultiplier = 1.0f + std::min(chargeTime / 60.0f, 0.5f);
 
-        // Two hitboxes on both sides
-        float hitboxWidth = width * 1.0f;
+        // Two hitboxes on both sides - slightly less range than fsmash
+        float hitboxWidth = width * 0.9f;
         float hitboxHeight = height * 0.5f;
         float hitboxY = position.y + height/2 - hitboxHeight/2;
 
@@ -1057,7 +1109,7 @@ void Character::downSmash(float chargeTime) {
             13.0f * chargeMultiplier,
             6.0f * chargeMultiplier,
             0.3f,
-            20.0f,
+            20.0f, // Semi-spike angle
             20,
             15
         ));
@@ -1069,10 +1121,13 @@ void Character::downSmash(float chargeTime) {
             13.0f * chargeMultiplier,
             6.0f * chargeMultiplier,
             0.3f,
-            160.0f,
+            160.0f, // Semi-spike angle
             20,
             15
         ));
+
+        // Solid endlag but less than the other smashes
+        attackDuration = 35;
     }
 }
 
@@ -1085,7 +1140,7 @@ void Character::neutralAir() {
         attackDuration = 25;
         changeState(ATTACKING);
 
-        // Circle hitbox around character
+        // Circle hitbox around character - hits all around
         float hitboxRadius = width * 1.2f;
         Rectangle hitboxRect = {
             position.x - hitboxRadius/2,
@@ -1094,7 +1149,11 @@ void Character::neutralAir() {
             hitboxRadius
         };
 
-        attacks.push_back(AttackBox(hitboxRect, 8.0f, 3.0f, 0.15f, 45.0f, 15, 15));
+        // Moderate damage, low knockback, faster than other aerials
+        attacks.push_back(AttackBox(hitboxRect, 8.0f, 3.0f, 0.12f, 45.0f, 15, 12));
+
+        // Low landing lag if attack has finished
+        // (would be implemented in the land function)
     }
 }
 
@@ -1106,14 +1165,18 @@ void Character::forwardAir() {
         attackDuration = 30;
         changeState(ATTACKING);
 
-        // Forward air hitbox
-        float hitboxWidth = width * 1.2f;
+        // Forward-reaching hitbox
+        float hitboxWidth = width * 1.3f;
         float hitboxHeight = height * 0.7f;
         float hitboxX = isFacingRight ? position.x + width/2 : position.x - width/2 - hitboxWidth;
         float hitboxY = position.y - hitboxHeight/2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 10.0f, 4.0f, 0.2f, isFacingRight ? 45.0f : 135.0f, 20, 15));
+
+        // Good damage and knockback
+        attacks.push_back(AttackBox(hitboxRect, 10.0f, 4.5f, 0.2f, isFacingRight ? 45.0f : 135.0f, 20, 15));
+
+        // Moderate landing lag penalty if not completed in air
     }
 }
 
@@ -1122,17 +1185,21 @@ void Character::backAir() {
         resetAttackState();
         isAttacking = true;
         currentAttack = BACK_AIR;
-        attackDuration = 25;
+        attackDuration = 28;
         changeState(ATTACKING);
 
-        // Back air hitbox (opposite of facing direction)
-        float hitboxWidth = width * 1.0f;
+        // Back hitbox (opposite of facing direction)
+        float hitboxWidth = width * 1.1f;
         float hitboxHeight = height * 0.8f;
         float hitboxX = isFacingRight ? position.x - width/2 - hitboxWidth : position.x + width/2;
         float hitboxY = position.y - hitboxHeight/2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 12.0f, 5.0f, 0.25f, isFacingRight ? 135.0f : 45.0f, 18, 12));
+
+        // Strong knockback - kill move
+        attacks.push_back(AttackBox(hitboxRect, 13.0f, 6.0f, 0.25f, isFacingRight ? 135.0f : 45.0f, 25, 15));
+
+        // High landing lag if not completed
     }
 }
 
@@ -1144,14 +1211,19 @@ void Character::upAir() {
         attackDuration = 25;
         changeState(ATTACKING);
 
-        // Up air hitbox
+        // Upward hitbox
         float hitboxWidth = width * 0.8f;
-        float hitboxHeight = height * 1.0f;
+        float hitboxHeight = height * 1.1f;
         float hitboxX = position.x - hitboxWidth/2;
         float hitboxY = position.y - height/2 - hitboxHeight;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 9.0f, 4.0f, 0.2f, 90.0f, 15, 12));
+
+        // Moderate damage, upward launch angle
+        attacks.push_back(AttackBox(hitboxRect, 9.0f, 4.0f, 0.2f, 85.0f, 15, 12));
+
+        // Medium landing lag
+        // Stronger when hit at the apex of the attack
     }
 }
 
@@ -1160,10 +1232,10 @@ void Character::downAir() {
         resetAttackState();
         isAttacking = true;
         currentAttack = DOWN_AIR;
-        attackDuration = 30;
+        attackDuration = 35; // Longest aerial
         changeState(ATTACKING);
 
-        // Down air hitbox (spike)
+        // Downward hitbox
         float hitboxWidth = width * 0.7f;
         float hitboxHeight = height * 1.0f;
         float hitboxX = position.x - hitboxWidth/2;
@@ -1171,10 +1243,14 @@ void Character::downAir() {
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
 
-        // Create a spike attack
-        AttackBox spike(hitboxRect, 12.0f, 3.0f, 0.15f, 270.0f, 20, 20);
+        // Strong spike with high risk/reward
+        AttackBox spike(hitboxRect, 14.0f, 3.0f, 0.15f, 270.0f, 25, 20);
         spike.canSpike = true;
         attacks.push_back(spike);
+
+        // Very high landing lag if not completed
+        // Fast fall when using for maximum impact
+        isFastFalling = true;
     }
 }
 
@@ -1185,7 +1261,7 @@ void Character::neutralSpecial() {
         isAttacking = true;
         currentAttack = NEUTRAL_SPECIAL;
         attackDuration = 40;
-        specialNeutralCD.current = specialNeutralCD.duration;
+        specialNeutralCD.current = specialNeutralCD.duration * 0.8f; // 80% of full cooldown
         changeState(ATTACKING);
 
         // Projectile hitbox
@@ -1196,12 +1272,15 @@ void Character::neutralSpecial() {
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
 
-        // Create a projectile
-        Vector2 projectileVel = {isFacingRight ? 10.0f : -10.0f, 0};
+        // Medium-speed projectile with moderate damage
+        Vector2 projectileVel = {isFacingRight ? 8.0f : -8.0f, 0};
         attacks.push_back(AttackBox(
-            hitboxRect, 12.0f, 3.0f, 0.1f, isFacingRight ? 0.0f : 180.0f, 20, 60,
+            hitboxRect, 8.0f, 2.0f, 0.1f, isFacingRight ? 0.0f : 180.0f, 15, 90,
             projectileVel, true
         ));
+
+        // Brief immobility during startup frames
+        velocity.x *= 0.3f;
     }
 }
 
@@ -1210,12 +1289,12 @@ void Character::sideSpecial() {
         resetAttackState();
         isAttacking = true;
         currentAttack = SIDE_SPECIAL;
-        attackDuration = 40;
+        attackDuration = 45;
         specialSideCD.current = specialSideCD.duration;
         changeState(ATTACKING);
 
-        // Add horizontal boost
-        velocity.x = isFacingRight ? speed * 2.0f : -speed * 2.0f;
+        // Add significant horizontal boost
+        velocity.x = isFacingRight ? speed * 2.5f : -speed * 2.5f;
 
         // Side special hitbox
         float hitboxWidth = width * 1.5f;
@@ -1224,7 +1303,9 @@ void Character::sideSpecial() {
         float hitboxY = position.y - hitboxHeight/2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 15.0f, 6.0f, 0.25f, isFacingRight ? 30.0f : 150.0f, 25, 25));
+        attacks.push_back(AttackBox(hitboxRect, 12.0f, 6.0f, 0.25f, isFacingRight ? 30.0f : 150.0f, 25, 25));
+
+        // Vulnerable during cooldown - can be punished if shielded
     }
 }
 
@@ -1237,8 +1318,13 @@ void Character::upSpecial() {
         specialUpCD.current = specialUpCD.duration;
         changeState(ATTACKING);
 
-        // Recovery move - add vertical boost
-        velocity.y = JUMP_FORCE * 1.2f;
+        // Strong vertical boost with slight horizontal component
+        velocity.y = JUMP_FORCE * 1.4f;
+        velocity.x = isFacingRight ? speed * 0.5f : -speed * 0.5f;
+
+        // Brief invincibility at startup (5 frames)
+        isInvincible = true;
+        invincibilityFrames = 5;
 
         // Up special hitbox
         float hitboxWidth = width * 1.2f;
@@ -1247,7 +1333,9 @@ void Character::upSpecial() {
         float hitboxY = position.y - hitboxHeight;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.2f, 90.0f, 20, 20));
+        attacks.push_back(AttackBox(hitboxRect, 10.0f, 5.0f, 0.2f, 80.0f, 20, 20));
+
+        // High vulnerability after recovery frames - cooldown
     }
 }
 
@@ -1257,7 +1345,7 @@ void Character::downSpecial() {
         isAttacking = true;
         currentAttack = DOWN_SPECIAL;
         attackDuration = 45;
-        specialDownCD.current = specialDownCD.duration;
+        specialDownCD.current = specialDownCD.duration * 1.2f; // 120% cooldown for powerful move
         changeState(ATTACKING);
 
         // Counter/reflector hitbox
@@ -1268,9 +1356,14 @@ void Character::downSpecial() {
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
 
-        // Create a reflector hitbox
+        // Create a reflector hitbox with counter properties
         AttackBox reflector(hitboxRect, 6.0f, 3.0f, 0.1f, 45.0f, 15, 30, AttackBox::REFLECTOR);
         attacks.push_back(reflector);
+
+        // High commitment - vulnerable if missed
+        // Freeze in place while countering
+        velocity.x = 0;
+        velocity.y *= 0.3f; // Reduced falling during counter
     }
 }
 
@@ -1280,7 +1373,7 @@ void Character::grab() {
         resetAttackState();
         isAttacking = true;
         currentAttack = GRAB;
-        attackDuration = 20;
+        attackDuration = 25;
         changeState(ATTACKING);
 
         // Grab hitbox
@@ -1291,9 +1384,11 @@ void Character::grab() {
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
 
-        // Create a grab hitbox
+        // Grab hitbox - no damage but initiates grab state
         AttackBox grabBox(hitboxRect, 0.0f, 0.0f, 0.0f, 0.0f, 0, 10, AttackBox::GRAB);
         attacks.push_back(grabBox);
+
+        // High end lag if missed - very punishable
     }
 }
 
