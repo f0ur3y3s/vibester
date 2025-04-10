@@ -41,6 +41,9 @@ public:
 
     // Override base class draw with network capability
     virtual void draw();
+    
+    // Override the state change function to handle network state changes
+    virtual void changeState(State newState) override;
 
     // Process remote player input
     void processRemoteInput();

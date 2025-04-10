@@ -174,6 +174,23 @@ void UpdateGame()
     if (IsKeyPressed(KEY_N)) {
         showNetworkMenu = !showNetworkMenu;
     }
+    
+    // First, always update networked game state to check for messages,
+    // even if we're in network UI mode
+    if (gameState.isNetworked()) {
+        // Only process network messages, don't do full game update
+        NetworkManager& netManager = NetworkManager::getInstance();
+        netManager.update();
+        
+        // Check explicitly for game start message when in client mode
+        if (gameState.getNetworkMode() == NetworkedGameState::CLIENT && netManager.hasGameStartMessage()) {
+            std::cout << "Game.cpp: Client detected game start message!" << std::endl;
+            showNetworkMenu = false;
+            gameState.changeState(GameState::GAME_START);
+            // Return early to start processing the game
+            return;
+        }
+    }
 
     // Update network UI if visible
     if (showNetworkMenu) {
@@ -238,11 +255,24 @@ void UpdateGame()
         break;
 
     case GameState::GAME_START:
+        // Hide network menu if it's open when the game is starting
+        if (showNetworkMenu) {
+            std::cout << "Game.cpp: Hiding network menu for game start" << std::endl;
+            showNetworkMenu = false;
+        }
+        
         // Game start countdown
         gameState.stateTimer++;
+        std::cout << "Game.cpp: Game start countdown: " << gameState.stateTimer << "/" << GAME_START_TIMER << std::endl;
         if (gameState.stateTimer >= GAME_START_TIMER)
         {
+            std::cout << "Game.cpp: Countdown finished, changing to GAME_PLAYING" << std::endl;
             gameState.changeState(GameState::GAME_PLAYING);
+        }
+        
+        // Call the standard game update to ensure player positions are properly updated
+        if (gameState.isNetworked()) {
+            gameState.update();
         }
         break;
 
@@ -610,6 +640,29 @@ void DrawGame()
     // Network status indicator
     if (gameState.isNetworked())
     {
+        // Special case: Force client into game mode if host is in game mode
+        // This is a fallback in case the MSG_GAME_START message was lost
+        if (gameState.isNetworked() && 
+            !gameState.isNetworkHost() && 
+            gameState.currentState != GameState::GAME_START && 
+            gameState.currentState != GameState::GAME_PLAYING &&
+            showNetworkMenu)
+        {
+            // Check if the host is in game state by looking at the game state packet
+            for (const auto& peer : NetworkManager::getInstance().peers) {
+                if (peer.playerID == 0) {  // Host is always ID 0
+                    // If host is in game mode, the ping will be active
+                    bool hostInGameState = (peer.lastPingTime > 0);
+                    if (hostInGameState) {
+                        std::cout << "EMERGENCY OVERRIDE: Detected host in game state, forcing client to start game" << std::endl;
+                        showNetworkMenu = false;
+                        gameState.changeState(GameState::GAME_START);
+                    }
+                    break;
+                }
+            }
+        }
+        
         Color statusColor = gameState.isNetworkHost() ? GREEN : BLUE;
         const char* statusText = gameState.isNetworkHost() ? "HOST" : "CLIENT";
         DrawText(statusText, SCREEN_WIDTH - 80, 10, 20, statusColor);
@@ -740,9 +793,15 @@ void DrawGame()
         break;
     }
 
-    // Draw network UI if visible
-    if (showNetworkMenu && networkUI) {
+    // Draw network UI if visible AND we're not in game start/play state
+    if (showNetworkMenu && networkUI && 
+        (gameState.currentState != GameState::GAME_START && 
+         gameState.currentState != GameState::GAME_PLAYING)) {
         networkUI->draw();
+    } else if (gameState.currentState == GameState::GAME_START || 
+               gameState.currentState == GameState::GAME_PLAYING) {
+        // Force hide UI during game states
+        showNetworkMenu = false;
     }
 
     // Draw debug info if enabled

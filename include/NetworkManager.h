@@ -50,6 +50,7 @@ struct NetworkInput {
 struct GameStatePacket {
     uint32_t frame;
     uint32_t checksum;  // For validation
+    uint32_t extraData; // Extra data for game state sync
     struct PlayerState {
         Vector2 position;
         Vector2 velocity;
@@ -87,6 +88,7 @@ public:
     bool startServer(int port);
     bool connectToServer(const std::string& address, int port);
     void disconnect();
+    bool sendToAll(const void* data, int size);
 
     // Network mode
     enum NetworkMode {
@@ -121,7 +123,10 @@ public:
     // Chat functionality
     void sendChatMessage(const std::string& message);
     bool receiveChatMessage(std::string& message);
-
+    
+    // Game control messages
+    bool hasGameStartMessage();
+    
     // Ping statistics
     int getAveragePing() const { return averagePing; }
 
@@ -149,7 +154,6 @@ private:
     // Network socket handling
     void handleIncomingMessages();
     bool sendMessage(const void* data, int size, const std::string& address, int port);
-    bool sendToAll(const void* data, int size);
 
     // Network protocol implementation
     void handleConnectRequest(const std::string& senderAddr, int senderPort, const uint8_t* data, int size);
@@ -183,6 +187,9 @@ private:
     std::queue<GameStatePacket> stateQueue;
     std::queue<std::string> chatQueue;
     std::mutex queueMutex;
+    
+    // Game control flags
+    std::atomic<bool> gameStartReceived;
 
     // Statistics
     int averagePing;

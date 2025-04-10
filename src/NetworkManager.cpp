@@ -45,6 +45,7 @@ NetworkManager::NetworkManager()
     , localPlayerName("Player")
     , serverPort(DEFAULT_PORT)
     , running(false)
+    , gameStartReceived(false)
     , averagePing(0)
     , lastFrameSent(0)
 {
@@ -463,7 +464,14 @@ void NetworkManager::handleIncomingMessages() {
                 break;
 
             case MSG_GAME_START:
-                // Game start logic will be handled by GameState
+                // Handle game start message for clients
+                if (mode == CLIENT) {
+                    std::cout << "NetworkManager: Received MSG_GAME_START message from host!" << std::endl;
+                    // Set the flag so NetworkedGameState can detect it
+                    bool wasSet = gameStartReceived.exchange(true);
+                    std::cout << "NetworkManager: Set gameStartReceived flag (was " 
+                              << (wasSet ? "already set" : "not set") << ")" << std::endl;
+                }
                 break;
 
             case MSG_GAME_END:
@@ -566,7 +574,16 @@ void NetworkManager::handleIncomingMessages() {
 
 bool NetworkManager::sendMessage(const void* data, int size, const std::string& address, int port) {
     if (!initialized || socketHandle == INVALID_SOCKET_HANDLE) {
+        std::cerr << "sendMessage: Socket not initialized" << std::endl;
         return false;
+    }
+
+    // Debug message type
+    if (size > 0) {
+        uint8_t msgType = *reinterpret_cast<const uint8_t*>(data);
+        if (msgType == MSG_GAME_START) {
+            std::cout << "sendMessage: Sending MSG_GAME_START to " << address << ":" << port << std::endl;
+        }
     }
 
     sockaddr_in destAddr;
@@ -584,26 +601,65 @@ bool NetworkManager::sendMessage(const void* data, int size, const std::string& 
 #endif
 
     if (bytesSent == SOCKET_ERROR_CODE) {
-        std::cerr << "Failed to send message: " << GET_SOCKET_ERROR() << std::endl;
+        std::cerr << "Failed to send message to " << address << ":" << port 
+                 << " - Error: " << GET_SOCKET_ERROR() << std::endl;
         return false;
+    }
+
+    if (size > 0 && *reinterpret_cast<const uint8_t*>(data) == MSG_GAME_START) {
+        std::cout << "Successfully sent MSG_GAME_START (" << bytesSent << " bytes) to " 
+                  << address << ":" << port << std::endl;
     }
 
     return true;
 }
 
+bool NetworkManager::hasGameStartMessage() {
+    // Check and reset the flag atomically
+    bool expected = true;
+    bool desired = false;
+    bool result = gameStartReceived.compare_exchange_strong(expected, desired);
+    
+    // Add debug output when the flag was set
+    if (result) {
+        std::cout << "NetworkManager: Game start message detected and flag reset" << std::endl;
+    }
+    
+    return result;
+}
+
 bool NetworkManager::sendToAll(const void* data, int size) {
     if (mode != SERVER) {
+        std::cout << "NetworkManager: sendToAll failed - not in server mode" << std::endl;
         return false;
     }
 
-    bool success = true;
-
-    for (const auto& peer : peers) {
-        if (!sendMessage(data, size, peer.address, peer.port)) {
-            success = false;
+    // Debug the message being sent
+    if (size > 0) {
+        uint8_t msgType = *reinterpret_cast<const uint8_t*>(data);
+        std::cout << "NetworkManager: sendToAll - Sending message type " << (int)msgType 
+                  << " to " << peers.size() << " peers" << std::endl;
+        
+        // Special handling for game start message
+        if (msgType == MSG_GAME_START) {
+            std::cout << "NetworkManager: Broadcasting MSG_GAME_START to all clients" << std::endl;
         }
     }
 
+    bool success = true;
+    int sentCount = 0;
+
+    for (const auto& peer : peers) {
+        if (sendMessage(data, size, peer.address, peer.port)) {
+            sentCount++;
+        } else {
+            success = false;
+            std::cout << "NetworkManager: Failed to send to peer " << peer.playerID 
+                      << " at " << peer.address << ":" << peer.port << std::endl;
+        }
+    }
+    
+    std::cout << "NetworkManager: Message sent to " << sentCount << "/" << peers.size() << " peers" << std::endl;
     return success;
 }
 

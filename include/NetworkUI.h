@@ -156,7 +156,8 @@ public:
         JOIN_GAME,
         LOBBY,
         MATCH_OPTIONS,
-        CHAT
+        CHAT,
+        HIDDEN   // Used when the game is in progress
     };
 
     // Update and draw

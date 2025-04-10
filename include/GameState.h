@@ -92,7 +92,7 @@ public:
     void draw();
 
     // State transition methods
-    void changeState(State newState);
+    virtual void changeState(State newState);
     void startMatch(const MatchSettings& settings);
     void endMatch();
     void pauseGame();

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <functional> // For std::hash
 #include <cstring> // For memset
+#include "NetworkManager.h" // For MSG_GAME_START
 
 NetworkedGameState::NetworkedGameState()
     : GameState()
@@ -170,6 +171,16 @@ void NetworkedGameState::update() {
 
                 // Synchronize game state to clients
                 synchronizeGameState();
+                
+                // Special handling for newly started game
+                static bool sentExtraStartMessage = false;
+                if (!sentExtraStartMessage && currentState == GAME_PLAYING) {
+                    std::cout << "Host: Sending extra game start message to ensure client starts" << std::endl;
+                    uint8_t startGameMsg[1];
+                    startGameMsg[0] = MSG_GAME_START;
+                    netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+                    sentExtraStartMessage = true;
+                }
 
                 // Increment network frame
                 networkFrame++;
@@ -180,6 +191,27 @@ void NetworkedGameState::update() {
             break;
 
         case CLIENT:
+            {
+                // Check if host has started the game
+                bool gameStarted = netManager.hasGameStartMessage();
+                std::cout << "CLIENT update(): hasGameStartMessage returned " << (gameStarted ? "true" : "false") << std::endl;
+                
+                if (gameStarted) {
+                    std::cout << "CLIENT: Game start message detected - starting game!" << std::endl;
+                    
+                    // Set the network UI state to HIDDEN in Game.cpp by notifying external code
+                    extern bool showNetworkMenu;
+                    bool oldValue = showNetworkMenu;
+                    showNetworkMenu = false;
+                    std::cout << "CLIENT: Set showNetworkMenu from " << (oldValue ? "true" : "false") 
+                              << " to " << (showNetworkMenu ? "true" : "false") << std::endl;
+                    
+                    // Change the game state to start
+                    std::cout << "CLIENT: Changing game state to GAME_START" << std::endl;
+                    changeState(GameState::GAME_START);
+                }
+            }
+            
             // As client, we follow the host's state
             if (currentState == GAME_PLAYING) {
                 // Process input
@@ -353,6 +385,30 @@ void NetworkedGameState::synchronizeGameState() {
                 stateBuffer.pop_back();
             }
 
+            // Check for game state information from the host
+            if (serverState.extraData >= GameState::GAME_START && 
+                serverState.extraData <= GameState::RESULTS_SCREEN && 
+                currentState != (GameState::State)serverState.extraData) {
+                
+                // Host is in a different state, we need to match it
+                GameState::State hostState = (GameState::State)serverState.extraData;
+                std::cout << "CLIENT: Host is in state " << hostState 
+                          << " but client is in state " << currentState 
+                          << ". Syncing states." << std::endl;
+                
+                if (hostState == GameState::GAME_START || hostState == GameState::GAME_PLAYING) {
+                    // Force hiding the network UI
+                    extern bool showNetworkMenu;
+                    showNetworkMenu = false;
+                    std::cout << "CLIENT: Setting showNetworkMenu to false" << std::endl;
+                }
+                
+                // Change to match host state
+                changeState(hostState);
+                
+                // Proceed with normal state sync
+            }
+            
             // Calculate local state for comparison
             GameStatePacket localState;
             constructGameStatePacket(localState);
@@ -360,32 +416,149 @@ void NetworkedGameState::synchronizeGameState() {
             // Compare checksums to detect desync
             if (serverState.checksum != localState.checksum) {
                 if (rollbackEnabled) {
-                    // TODO: Implement rollback netcode
-                    // For now, just correct positions
-                    for (int i = 0; i < std::min(2, (int)players.size()); i++) {
-                        // Smooth correction towards server state
-                        Vector2 serverPos = serverState.players[i].position;
-                        Vector2 localPos = players[i]->physics.position;
-
-                        float dist = std::sqrt(
-                            (serverPos.x - localPos.x) * (serverPos.x - localPos.x) +
-                            (serverPos.y - localPos.y) * (serverPos.y - localPos.y)
-                        );
-
-                        // Only correct if significant difference
-                        if (dist > 5.0f) {
-                            // Lerp position
-                            players[i]->physics.position.x = localPos.x + (serverPos.x - localPos.x) * 0.3f;
-                            players[i]->physics.position.y = localPos.y + (serverPos.y - localPos.y) * 0.3f;
-
-                            // Adopt server velocity
+                    // Implement rollback netcode
+                    // Find the frame difference
+                    int frameDiff = networkFrame - serverState.frame;
+                    
+                    // Only rollback if frame difference is reasonable
+                    if (frameDiff > 0 && frameDiff < 10) {
+                        // Rollback simulation
+                        // 1. Save current state
+                        GameStatePacket currentState;
+                        constructGameStatePacket(currentState);
+                        
+                        // 2. Reapply inputs from the frame of the server state
+                        // Find the correct inputs in history (if available)
+                        std::deque<NetworkInput> localInputsToReapply;
+                        std::deque<NetworkInput> remoteInputsToReapply;
+                        
+                        // Collect inputs from history that are after the server state frame
+                        for (const auto& input : localInputHistory) {
+                            if (input.frame >= serverState.frame) {
+                                localInputsToReapply.push_front(input);
+                            }
+                        }
+                        
+                        for (const auto& input : remoteInputHistory) {
+                            if (input.frame >= serverState.frame) {
+                                remoteInputsToReapply.push_front(input);
+                            }
+                        }
+                        
+                        // 3. Apply server state as starting point
+                        for (int i = 0; i < std::min(2, (int)players.size()); i++) {
+                            players[i]->physics.position = serverState.players[i].position;
                             players[i]->physics.velocity = serverState.players[i].velocity;
-
-                            // Update sync percentage
-                            syncPercentage = std::max(0.0f, syncPercentage - 1.0f);
+                            players[i]->damagePercent = serverState.players[i].damagePercent;
+                            players[i]->stocks = serverState.players[i].stocks;
+                            players[i]->stateManager.state = (CharacterState)(serverState.players[i].stateID);
+                            players[i]->stateManager.isFacingRight = serverState.players[i].isFacingRight;
+                            players[i]->stateManager.isAttacking = serverState.players[i].isAttacking;
+                            players[i]->stateManager.currentAttack = (AttackType)(serverState.players[i].currentAttack);
+                            players[i]->stateManager.attackFrame = serverState.players[i].attackFrame;
+                        }
+                        
+                        // 4. Resimulate by applying inputs in order
+                        for (int frame = 0; frame < frameDiff; frame++) {
+                            // Apply inputs for this frame if available
+                            NetworkInput localInput = {};
+                            NetworkInput remoteInput = {};
+                            
+                            // Find inputs for this frame
+                            for (const auto& input : localInputsToReapply) {
+                                if (input.frame == serverState.frame + frame) {
+                                    localInput = input;
+                                    break;
+                                }
+                            }
+                            
+                            for (const auto& input : remoteInputsToReapply) {
+                                if (input.frame == serverState.frame + frame) {
+                                    remoteInput = input;
+                                    break;
+                                }
+                            }
+                            
+                            // Apply inputs to characters
+                            Character* localPlayer = (networkMode == HOST) ? players[0] : players[1];
+                            Character* remotePlayer = (networkMode == HOST) ? players[1] : players[0];
+                            
+                            applyNetworkInput(localPlayer, localInput);
+                            applyNetworkInput(remotePlayer, remoteInput);
+                            
+                            // Update players for one frame
+                            for (auto& player : players) {
+                                player->update(platforms);
+                            }
+                            
+                            // Check for character collisions for attacks
+                            for (auto& attacker : players) {
+                                if (attacker->stateManager.isAttacking) {
+                                    for (auto& defender : players) {
+                                        if (attacker != defender) {
+                                            attacker->checkHit(*defender);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Update sync percentage based on how close we get after rollback
+                        GameStatePacket newState;
+                        constructGameStatePacket(newState);
+                        
+                        if (newState.checksum == serverState.checksum) {
+                            // Perfect sync after rollback
+                            syncPercentage = 100.0f;
                         } else {
-                            // Gradually restore sync percentage
-                            syncPercentage = std::min(100.0f, syncPercentage + 0.1f);
+                            // Still some desync, penalize sync percentage
+                            syncPercentage = std::max(0.0f, syncPercentage - 0.5f);
+                            
+                            // Check how different positions are
+                            for (int i = 0; i < std::min(2, (int)players.size()); i++) {
+                                Vector2 serverPos = serverState.players[i].position;
+                                Vector2 localPos = players[i]->physics.position;
+                                
+                                float dist = std::sqrt(
+                                    (serverPos.x - localPos.x) * (serverPos.x - localPos.x) +
+                                    (serverPos.y - localPos.y) * (serverPos.y - localPos.y)
+                                );
+                                
+                                // If still a significant difference, apply a subtle correction
+                                if (dist > 10.0f) {
+                                    // Lerp position with a very small correction factor (to avoid jerky movement)
+                                    players[i]->physics.position.x = localPos.x + (serverPos.x - localPos.x) * 0.1f;
+                                    players[i]->physics.position.y = localPos.y + (serverPos.y - localPos.y) * 0.1f;
+                                }
+                            }
+                        }
+                    } else {
+                        // Frame difference too large for rollback, just correct positions
+                        for (int i = 0; i < std::min(2, (int)players.size()); i++) {
+                            // Smooth correction towards server state
+                            Vector2 serverPos = serverState.players[i].position;
+                            Vector2 localPos = players[i]->physics.position;
+
+                            float dist = std::sqrt(
+                                (serverPos.x - localPos.x) * (serverPos.x - localPos.x) +
+                                (serverPos.y - localPos.y) * (serverPos.y - localPos.y)
+                            );
+
+                            // Only correct if significant difference
+                            if (dist > 5.0f) {
+                                // Lerp position
+                                players[i]->physics.position.x = localPos.x + (serverPos.x - localPos.x) * 0.3f;
+                                players[i]->physics.position.y = localPos.y + (serverPos.y - localPos.y) * 0.3f;
+
+                                // Adopt server velocity
+                                players[i]->physics.velocity = serverState.players[i].velocity;
+
+                                // Update sync percentage
+                                syncPercentage = std::max(0.0f, syncPercentage - 1.0f);
+                            } else {
+                                // Gradually restore sync percentage
+                                syncPercentage = std::min(100.0f, syncPercentage + 0.1f);
+                            }
                         }
                     }
                 } else {
@@ -444,6 +617,21 @@ bool NetworkedGameState::receiveChatMessage(std::string& message) {
     message = chatHistory.back();
     newChatMessage = false;
     return true;
+}
+
+void NetworkedGameState::changeState(GameState::State newState) {
+    // Handle network-specific state changes
+    if (newState == GAME_START && networkMode == HOST) {
+        // Send game start message to all clients
+        NetworkManager& netManager = NetworkManager::getInstance();
+        uint8_t startGameMsg[1];
+        startGameMsg[0] = MSG_GAME_START;
+        netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+        std::cout << "Host: Sent game start message to all clients" << std::endl;
+    }
+    
+    // Call the parent class implementation to handle the actual state change
+    GameState::changeState(newState);
 }
 
 void NetworkedGameState::applyNetworkInput(Character* character, const NetworkInput& input) {
@@ -580,6 +768,11 @@ void NetworkedGameState::constructGameStatePacket(GameStatePacket& packet) {
 
     // Set frame number
     packet.frame = networkFrame;
+    
+    // Add current game state information
+    // Store in the high bits of the checksum to leave low bits for actual checksum
+    // This helps ensure the client knows what state the host is in
+    packet.extraData = (uint32_t)currentState;
 
     // Fill player states
     for (int i = 0; i < std::min(2, (int)players.size()); i++) {

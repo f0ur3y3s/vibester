@@ -522,6 +522,36 @@ void NetworkUI::showLobby() {
     currentState = LOBBY;
     activeElements = &lobbyElements;
 
+    // Initialize UI elements based on whether this is a host or client
+    NetworkManager& netManager = NetworkManager::getInstance();
+    bool isHost = gameState->getNetworkMode() == NetworkedGameState::HOST;
+    bool hasClients = !netManager.peers.empty();
+    
+    // Find start button and waiting label by name
+    Button* startButton = nullptr;
+    Label* waitingLabel = nullptr;
+    
+    for (auto& element : lobbyElements) {
+        Button* btn = dynamic_cast<Button*>(element);
+        if (btn && btn->text == "Start Game") {
+            startButton = btn;
+        }
+        
+        Label* lbl = dynamic_cast<Label*>(element);
+        if (lbl && lbl->text == "Waiting for players...") {
+            waitingLabel = lbl;
+        }
+    }
+    
+    // Update visibility
+    if (startButton) {
+        startButton->setVisible(isHost && hasClients);
+    }
+    
+    if (waitingLabel) {
+        waitingLabel->setVisible(isHost && !hasClients);
+    }
+
     refreshPlayerList();
     refreshNetworkStats();
 }
@@ -597,6 +627,12 @@ void NetworkUI::onJoinGameClicked() {
 }
 
 void NetworkUI::onStartMatchClicked() {
+    // Only the host can start the match
+    if (gameState->getNetworkMode() != NetworkedGameState::HOST) {
+        std::cerr << "Non-host tried to start the match" << std::endl;
+        return;
+    }
+
     // Set match settings
     if (enableRollbackCheckbox) {
         gameState->setRollbackEnabled(enableRollbackCheckbox->isChecked);
@@ -606,8 +642,19 @@ void NetworkUI::onStartMatchClicked() {
         gameState->setInputDelay(static_cast<int>(inputDelaySlider->getValue()));
     }
 
-    // Start the match
+    // Log for debugging
+    NetworkManager& netManager = NetworkManager::getInstance();
+    std::cout << "Host starting match with " << netManager.peers.size() + 1 << " players" << std::endl;
+    
+    // Make sure the game state is correctly set
+    // We'll rely on Game.cpp to hide the UI when the state changes
+    
+    // Let the NetworkedGameState handle the game start
+    // It will propagate the message to clients 
     gameState->changeState(GameState::GAME_START);
+    
+    // Return to Game.cpp's main loop - this will make the network UI invisible immediately
+    currentState = HIDDEN;
 }
 
 void NetworkUI::onCancelClicked() {
@@ -661,20 +708,87 @@ void NetworkUI::refreshPlayerList() {
 
     // Update player count
     if (playerCountLabel) {
-        // We don't have direct access to peers, so for now just show 1 (local player)
-        // TODO: Add method to NetworkManager to get peer count
-        int playerCount = 1;  // Just local player for now
+        // Get peers from NetworkManager
+        int playerCount = 1 + netManager.peers.size();  // Local player + connected peers
         playerCountLabel->setText("Players: " + std::to_string(playerCount));
     }
 
-    // TODO: Update player labels once we have proper player list API
-    // For now, just show the host/client status
+    // Display player list
     if (statusLabel) {
         if (gameState->getNetworkMode() == NetworkedGameState::HOST) {
             statusLabel->setText("Status: Hosting");
         } else {
             statusLabel->setText("Status: Connected as Client");
         }
+    }
+    
+    // First, hide all player labels
+    for (auto& label : playerLabels) {
+        label->setVisible(false);
+    }
+    
+    // Add local player at index 0
+    if (playerLabels.size() > 0) {
+        playerLabels[0]->setText(netManager.getLocalPlayerName() + " (You)");
+        playerLabels[0]->setVisible(true);
+    }
+    
+    // Add remote players
+    int index = 1;
+    for (const auto& peer : netManager.peers) {
+        if (index < playerLabels.size()) {
+            playerLabels[index]->setText(peer.playerName);
+            playerLabels[index]->setVisible(true);
+            index++;
+        }
+    }
+    
+    // Let's debug the issue by printing the element types in the vector
+    std::cout << "LobbyElements count: " << lobbyElements.size() << std::endl;
+    for (int i = 0; i < lobbyElements.size(); i++) {
+        // Try to identify the element type
+        if (dynamic_cast<Button*>(lobbyElements[i])) {
+            Button* btn = dynamic_cast<Button*>(lobbyElements[i]);
+            std::cout << "Element " << i << ": Button - " << btn->text << std::endl;
+        } else if (dynamic_cast<Label*>(lobbyElements[i])) {
+            Label* lbl = dynamic_cast<Label*>(lobbyElements[i]);
+            std::cout << "Element " << i << ": Label - " << lbl->text << std::endl;
+        } else {
+            std::cout << "Element " << i << ": Unknown type" << std::endl;
+        }
+    }
+    
+    // Update the start button and waiting message visibility
+    bool isHost = gameState->getNetworkMode() == NetworkedGameState::HOST;
+    bool hasClients = netManager.peers.size() > 0;
+
+    // Look for start button by name
+    Button* startButton = nullptr;
+    Label* waitingLabel = nullptr;
+    
+    for (auto& element : lobbyElements) {
+        Button* btn = dynamic_cast<Button*>(element);
+        if (btn && btn->text == "Start Game") {
+            startButton = btn;
+        }
+        
+        Label* lbl = dynamic_cast<Label*>(element);
+        if (lbl && lbl->text == "Waiting for players...") {
+            waitingLabel = lbl;
+        }
+    }
+
+    if (startButton) {
+        // Only show the start button if this is the host and at least one client is connected
+        startButton->setVisible(isHost && hasClients);
+        
+        // Make sure onClick handler is properly set
+        startButton->onClick = [this]() { this->onStartMatchClicked(); };
+    }
+    
+    if (waitingLabel) {
+        // Only show the waiting message if this is the host and no clients are connected
+        waitingLabel->setVisible(isHost && !hasClients);
     }
 }
 
@@ -899,13 +1013,29 @@ void NetworkUI::createLobbyUI() {
     );
     lobbyElements.push_back(chatButton);
 
-    // Start button (only visible for host)
+    // Start button (only visible for host with players)
     Button* startButton = new Button(
         {GetScreenWidth() / 2 + 100, 420, 120, 40},
         "Start Game",
         [this]() { this->onStartMatchClicked(); }
     );
+    // Initialize visibility based on host status and connected clients
+    NetworkManager& netMgr = NetworkManager::getInstance();
+    bool isHost = gameState->getNetworkMode() == NetworkedGameState::HOST;
+    bool hasClients = netMgr.peers.size() > 0;
+    startButton->setVisible(isHost && hasClients);
     lobbyElements.push_back(startButton);
+    
+    // Waiting for players label (only visible for host without clients)
+    Label* waitingLabel = new Label(
+        {GetScreenWidth() / 2 + 60, 420, 200, 40},
+        "Waiting for players...",
+        20,  // Increase font size
+        YELLOW
+    );
+    // Make sure it's initially visible for hosts with no clients
+    waitingLabel->setVisible(isHost && !hasClients);
+    lobbyElements.push_back(waitingLabel);
 
     // Disconnect button
     Button* disconnectButton = new Button(
