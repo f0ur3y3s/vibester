@@ -26,7 +26,7 @@ AttackBox::AttackBox(Rectangle r, float dmg, float baseKB, float kbScaling, floa
 
 // Constructor for projectile
 AttackBox::AttackBox(Rectangle r, float dmg, float baseKB, float kbScaling, float kbAngle, int hitstun, int dur,
-                     Vector2 vel, bool destroy = false)
+                     Vector2 vel, bool destroy)
 {
     rect = r;
     damage = dmg;
@@ -104,11 +104,22 @@ void AttackBox::updatePosition(Vector2 ownerPos, bool isFacingRight)
 
     // Calculate offset based on facing direction
     float offsetX = isFacingRight ? 1.0f : -1.0f;
-    float boxCenterX = ownerPos.x + (rect.width / 2) * offsetX;
+    float boxWidth = rect.width;
 
-    // Adjust the rect position
-    rect.x = boxCenterX - (rect.width / 2);
-    rect.y = ownerPos.y - (rect.height / 2);
+    // For attacks that face the character's direction
+    if (isFacingRight)
+    {
+        // Right-facing position
+        rect.x = ownerPos.x + boxWidth / 4;
+    }
+    else
+    {
+        // Left-facing position - need to position to the left of character
+        rect.x = ownerPos.x - boxWidth - boxWidth / 4;
+    }
+
+    // Center vertically
+    rect.y = ownerPos.y - rect.height / 2;
 }
 
 void AttackBox::draw(bool debugMode = false)
@@ -141,23 +152,4 @@ void AttackBox::draw(bool debugMode = false)
 
     DrawRectangleRec(rect, hitboxColor);
     DrawRectangleLinesEx(rect, 2, {255, 255, 255, 200});
-}
-
-// Calculate final knockback based on target damage
-Vector2 AttackBox::calculateKnockback(float targetDamage, float chargeMultiplier = 1.0f)
-{
-    float angle = knockbackAngle * DEG2RAD;
-    float knockbackMagnitude = baseKnockback +
-        (damage * targetDamage * 0.05f * knockbackScaling * chargeMultiplier);
-
-    if (launchesUpward)
-    {
-        // Override angle to be upward
-        angle = 270.0f * DEG2RAD;
-    }
-
-    return {
-        cosf(angle) * knockbackMagnitude,
-        sinf(angle) * knockbackMagnitude
-    };
 }

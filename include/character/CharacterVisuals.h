@@ -10,123 +10,144 @@
 class Character;
 
 // Animation frame data
-struct AnimationFrame {
-    Rectangle sourceRect;  // Source rectangle from spritesheet
-    float duration;        // Frame duration in seconds
-    Vector2 offset;        // Offset to apply to character position
-    Vector2 hitboxOffset;  // Offset for attack hitbox (if applicable)
-    Vector2 hitboxSize;    // Size of attack hitbox (if applicable)
-    bool isHitActive;      // Whether this frame has an active hit
+struct AnimationFrame
+{
+    Rectangle sourceRect; // Source rectangle from spritesheet
+    float duration; // Frame duration in seconds
+    Vector2 offset; // Offset to apply to character position
+    Vector2 hitboxOffset; // Offset for attack hitbox (if applicable)
+    Vector2 hitboxSize; // Size of attack hitbox (if applicable)
+    bool isHitActive; // Whether this frame has an active hit
 };
 
 // Animation data
-struct Animation {
+struct Animation
+{
     std::vector<AnimationFrame> frames;
-    bool loops;                     // Whether animation loops
-    float totalDuration;            // Total duration of animation
-    int currentFrame;               // Current frame index
-    float timer;                    // Current frame timer
+    bool loops; // Whether animation loops
+    float totalDuration; // Total duration of animation
+    int currentFrame; // Current frame index
+    float timer; // Current frame timer
 
-    Animation() : loops(false), totalDuration(0), currentFrame(0), timer(0) {}
+    Animation() : loops(false), totalDuration(0), currentFrame(0), timer(0)
+    {
+    }
 
-    void update(float deltaTime, bool facingLeft) {
+    void update(float deltaTime, bool facingLeft)
+    {
         timer += deltaTime;
 
         // Check if we should advance to next frame
-        if (timer >= frames[currentFrame].duration) {
+        if (timer >= frames[currentFrame].duration)
+        {
             timer -= frames[currentFrame].duration;
             currentFrame++;
 
             // Handle looping or end of animation
-            if (currentFrame >= frames.size()) {
-                if (loops) {
+            if (currentFrame >= frames.size())
+            {
+                if (loops)
+                {
                     currentFrame = 0;
-                } else {
-                    currentFrame = frames.size() - 1;  // Stay on last frame
+                }
+                else
+                {
+                    currentFrame = frames.size() - 1; // Stay on last frame
                 }
             }
         }
     }
 
     // Get current frame data
-    AnimationFrame& getCurrentFrame() {
+    AnimationFrame& getCurrentFrame()
+    {
         return frames[currentFrame];
     }
 
     // Reset animation
-    void reset() {
+    void reset()
+    {
         currentFrame = 0;
         timer = 0.0f;
     }
 
     // Check if animation is finished
-    bool isFinished() const {
+    bool isFinished() const
+    {
         return !loops && currentFrame == frames.size() - 1 && timer >= frames[currentFrame].duration;
     }
 };
 
 // Character visual style
-enum CharacterStyle {
-    STYLE_BRAWLER,    // Like Mario, balanced fighter
-    STYLE_SPEEDY,     // Like Fox, fast but light
-    STYLE_HEAVY,      // Like Bowser, strong but slow
-    STYLE_SWORD,      // Like Link, uses weapons
-    STYLE_CUSTOM      // Custom style
+enum CharacterStyle
+{
+    STYLE_BRAWLER, // Like Mario, balanced fighter
+    STYLE_SPEEDY, // Like Fox, fast but light
+    STYLE_HEAVY, // Like Bowser, strong but slow
+    STYLE_SWORD, // Like Link, uses weapons
+    STYLE_CUSTOM // Custom style
 };
 
 // Visual effects
-struct VisualEffect {
+struct VisualEffect
+{
     Vector2 position;
     float lifeSpan;
     float currentLife;
     float scale;
     float rotation;
     Color color;
-    int effectType;  // 0 = hit spark, 1 = dust, 2 = shield, 3 = smash charge, etc.
+    int effectType; // 0 = hit spark, 1 = dust, 2 = shield, 3 = smash charge, etc.
 
-    bool update(float deltaTime) {
+    bool update(float deltaTime)
+    {
         currentLife -= deltaTime;
         return currentLife > 0;
     }
 };
 
 // CharacterVisuals class to handle all visual aspects
-class CharacterVisuals {
+class CharacterVisuals
+{
 private:
-    Character* owner;                                 // Pointer to owner character
-    Texture2D spriteSheet;                            // Character sprite sheet
-    std::unordered_map<std::string, Animation> animations;  // Map of animations by name
-    std::string currentAnimation;                     // Current animation name
-    bool facingLeft;                                  // Direction character is facing
-    float visualScale;                                // Visual scale (can be different from hitbox)
-    CharacterStyle style;                             // Character's visual style
-    Color mainColor;                                  // Primary character color
-    Color secondaryColor;                             // Secondary character color
-    Color effectColor;                                // Special effect color
+    Character* owner; // Pointer to owner character
+    Texture2D spriteSheet; // Character sprite sheet
+    std::unordered_map<std::string, Animation> animations; // Map of animations by name
+    std::string currentAnimation; // Current animation name
+    bool facingLeft; // Direction character is facing
+    float visualScale; // Visual scale (can be different from hitbox)
+    CharacterStyle style; // Character's visual style
+    Color mainColor; // Primary character color
+    Color secondaryColor; // Secondary character color
+    Color effectColor; // Special effect color
 
-    std::vector<VisualEffect> effects;                // Active visual effects
+    std::vector<VisualEffect> effects; // Active visual effects
 
     // Shader effects
-    Shader outlineShader;                             // Outline shader for character
-    Shader smashChargeShader;                         // Smash attack charge shader
-    bool useShaders;                                  // Whether to use shaders
+    Shader outlineShader; // Outline shader for character
+    Shader smashChargeShader; // Smash attack charge shader
+    bool useShaders; // Whether to use shaders
 
     // Trail effect for fast movements
-    struct TrailPoint {
+    struct TrailPoint
+    {
         Vector2 position;
         float alpha;
     };
-    std::vector<TrailPoint> movementTrail;            // Movement trail points
+
+    std::vector<TrailPoint> movementTrail; // Movement trail points
 
     // Particle system
-    struct Particle {
+    struct Particle
+    {
         Vector2 position;
         Vector2 velocity;
         Color color;
         float size;
         float life;
     };
-    std::vector<Particle> particles;                  // Active particles
+
+    std::vector<Particle> particles; // Active particles
 
 public:
     CharacterVisuals(Character* character, CharacterStyle characterStyle, Color primary, Color secondary);
@@ -202,6 +223,13 @@ public:
     // Add methods for visualizing death and explosion animations
     void drawDeathAnimation(Vector2 position, float width, float height, float rotation, float scale, float damage);
     void drawExplosionEffect(Vector2 position, int frame, int totalFrames);
+
+    void drawCustomCharacter(Vector2 position, float width, float height, float damageGlow);
+    void setupPlaceholderAnimations();
+    void drawSpeedyCharacter(Vector2 position, float width, float height, float damageGlow);
+    void drawHeavyCharacter(Vector2 position, float width, float height, float damageGlow);
+    void drawSwordCharacter(Vector2 position, float width, float height, float damageGlow);
+    void drawBrawlerCharacter(Vector2 position, float width, float height, float damageGlow);
 };
 
 #endif // CHARACTER_VISUALS_H

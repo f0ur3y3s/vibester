@@ -15,10 +15,12 @@
 #include <random>
 
 // Background class definition - add this to your existing declarations
-class Background {
+class Background
+{
 private:
     // Background layers
-    struct CloudLayer {
+    struct CloudLayer
+    {
         std::vector<Rectangle> clouds;
         Color color;
         float speed;
@@ -30,7 +32,8 @@ private:
     Color skyBottomColor;
 
     // Distant elements (mountains, hills)
-    struct DistantElement {
+    struct DistantElement
+    {
         std::vector<Vector2> points;
         Color color;
     };
@@ -38,7 +41,8 @@ private:
     std::vector<DistantElement> distantElements;
 
     // Background theme type
-    enum BackgroundTheme {
+    enum BackgroundTheme
+    {
         THEME_SKY,
         THEME_SUNSET,
         THEME_NIGHT,
@@ -52,7 +56,8 @@ private:
     std::mt19937 rng;
 
 public:
-    Background() : time(0) {
+    Background() : time(0)
+    {
         // Seed random generator
         rng.seed(static_cast<unsigned int>(std::time(nullptr)));
 
@@ -60,7 +65,8 @@ public:
         setRandomTheme();
     }
 
-    void setRandomTheme() {
+    void setRandomTheme()
+    {
         // Pick a random theme
         std::uniform_int_distribution<int> themeDist(0, 3);
         currentTheme = static_cast<BackgroundTheme>(themeDist(rng));
@@ -70,35 +76,37 @@ public:
         distantElements.clear();
 
         // Set colors based on theme
-        switch (currentTheme) {
-            case THEME_SKY:
-                skyTopColor = {100, 181, 246, 255};  // Light blue
-                skyBottomColor = {179, 229, 252, 255};  // Very light blue
-                generateSkyTheme();
-                break;
+        switch (currentTheme)
+        {
+        case THEME_SKY:
+            skyTopColor = {100, 181, 246, 255}; // Light blue
+            skyBottomColor = {179, 229, 252, 255}; // Very light blue
+            generateSkyTheme();
+            break;
 
-            case THEME_SUNSET:
-                skyTopColor = {33, 150, 243, 255};   // Deep blue
-                skyBottomColor = {255, 152, 0, 255}; // Orange
-                generateSunsetTheme();
-                break;
+        case THEME_SUNSET:
+            skyTopColor = {33, 150, 243, 255}; // Deep blue
+            skyBottomColor = {255, 152, 0, 255}; // Orange
+            generateSunsetTheme();
+            break;
 
-            case THEME_NIGHT:
-                skyTopColor = {25, 25, 112, 255};    // Midnight blue
-                skyBottomColor = {48, 63, 159, 255}; // Indigo
-                generateNightTheme();
-                break;
+        case THEME_NIGHT:
+            skyTopColor = {25, 25, 112, 255}; // Midnight blue
+            skyBottomColor = {48, 63, 159, 255}; // Indigo
+            generateNightTheme();
+            break;
 
-            case THEME_BATTLEFIELD:
-                skyTopColor = {33, 33, 33, 255};     // Dark gray
-                skyBottomColor = {97, 97, 97, 255};  // Medium gray
-                generateBattlefieldTheme();
-                break;
+        case THEME_BATTLEFIELD:
+            skyTopColor = {33, 33, 33, 255}; // Dark gray
+            skyBottomColor = {97, 97, 97, 255}; // Medium gray
+            generateBattlefieldTheme();
+            break;
         }
     }
 
 private:
-    void generateSkyTheme() {
+    void generateSkyTheme()
+    {
         // Generate 3 cloud layers
         std::uniform_real_distribution<float> speedDist(0.2f, 1.0f);
 
@@ -120,12 +128,13 @@ private:
 
         // Generate distant hills
         DistantElement hills;
-        hills.color = {46, 125, 50, 200};  // Green
+        hills.color = {46, 125, 50, 200}; // Green
         generateHills(hills, SCREEN_HEIGHT * 0.65f, SCREEN_HEIGHT * 0.2f, 3);
         distantElements.push_back(hills);
     }
 
-    void generateSunsetTheme() {
+    void generateSunsetTheme()
+    {
         // Generate orange-tinted clouds
         std::uniform_real_distribution<float> speedDist(0.1f, 0.8f);
 
@@ -147,12 +156,13 @@ private:
 
         // Generate distant mountains
         DistantElement mountains;
-        mountains.color = {69, 39, 160, 230};  // Deep purple
+        mountains.color = {69, 39, 160, 230}; // Deep purple
         generateMountains(mountains, SCREEN_HEIGHT * 0.7f, SCREEN_HEIGHT * 0.25f, 5);
         distantElements.push_back(mountains);
     }
 
-    void generateNightTheme() {
+    void generateNightTheme()
+    {
         // Generate star field
         DistantElement stars;
         stars.color = {255, 255, 255, 255};
@@ -172,18 +182,19 @@ private:
 
         // Generate distant mountains
         DistantElement mountains;
-        mountains.color = {26, 35, 126, 255};  // Very dark blue
+        mountains.color = {26, 35, 126, 255}; // Very dark blue
         generateMountains(mountains, SCREEN_HEIGHT * 0.75f, SCREEN_HEIGHT * 0.3f, 4);
         distantElements.push_back(mountains);
     }
 
-    void generateBattlefieldTheme() {
+    void generateBattlefieldTheme()
+    {
         // Generate tech-looking elements
         std::uniform_real_distribution<float> speedDist(0.1f, 0.3f);
 
         // Generate mesh/grid lines
         DistantElement gridlines;
-        gridlines.color = {0, 229, 255, 100};  // Cyan
+        gridlines.color = {0, 229, 255, 100}; // Cyan
         generateGridlines(gridlines, 20);
         distantElements.push_back(gridlines);
 
@@ -197,12 +208,13 @@ private:
 
         // Generate tech structures
         DistantElement structures;
-        structures.color = {66, 66, 66, 230};  // Dark gray
+        structures.color = {66, 66, 66, 230}; // Dark gray
         generateTechStructures(structures);
         distantElements.push_back(structures);
     }
 
-    void generateCloudsForLayer(CloudLayer& layer, int minClouds, int maxClouds) {
+    void generateCloudsForLayer(CloudLayer& layer, int minClouds, int maxClouds)
+    {
         std::uniform_int_distribution<int> cloudCountDist(minClouds, maxClouds);
         std::uniform_real_distribution<float> widthDist(80.0f, 300.0f);
         std::uniform_real_distribution<float> heightDist(30.0f, 80.0f);
@@ -210,7 +222,8 @@ private:
 
         int cloudCount = cloudCountDist(rng);
 
-        for (int i = 0; i < cloudCount; i++) {
+        for (int i = 0; i < cloudCount; i++)
+        {
             Rectangle cloud;
             cloud.width = widthDist(rng);
             cloud.height = heightDist(rng);
@@ -221,7 +234,8 @@ private:
         }
     }
 
-    void generateHills(DistantElement& hills, float baseY, float height, int segments) {
+    void generateHills(DistantElement& hills, float baseY, float height, int segments)
+    {
         std::uniform_real_distribution<float> heightDist(0.5f, 1.0f);
 
         float segmentWidth = SCREEN_WIDTH / static_cast<float>(segments);
@@ -230,7 +244,8 @@ private:
         hills.points.push_back({0, baseY});
 
         // Generate hill points
-        for (int i = 0; i <= segments; i++) {
+        for (int i = 0; i <= segments; i++)
+        {
             float x = i * segmentWidth;
             float y = baseY - height * heightDist(rng);
             hills.points.push_back({x, y});
@@ -240,7 +255,8 @@ private:
         hills.points.push_back({SCREEN_WIDTH, baseY});
     }
 
-    void generateMountains(DistantElement& mountains, float baseY, float height, int peaks) {
+    void generateMountains(DistantElement& mountains, float baseY, float height, int peaks)
+    {
         std::uniform_real_distribution<float> heightDist(0.6f, 1.0f);
         std::uniform_real_distribution<float> widthDist(0.8f, 1.2f);
 
@@ -250,7 +266,8 @@ private:
         mountains.points.push_back({0, baseY});
 
         // Generate mountain peaks
-        for (int i = 0; i < peaks; i++) {
+        for (int i = 0; i < peaks; i++)
+        {
             float centerX = (i + 0.5f) * segmentWidth;
             float peakHeight = height * heightDist(rng);
             float leftX = centerX - segmentWidth * 0.25f * widthDist(rng);
@@ -270,31 +287,38 @@ private:
         mountains.points.push_back({SCREEN_WIDTH, baseY});
     }
 
-    void generateStars(DistantElement& stars, int count) {
+    void generateStars(DistantElement& stars, int count)
+    {
         std::uniform_real_distribution<float> xDist(0.0f, SCREEN_WIDTH);
         std::uniform_real_distribution<float> yDist(0.0f, SCREEN_HEIGHT * 0.6f);
 
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < count; i++)
+        {
             stars.points.push_back({xDist(rng), yDist(rng)});
         }
     }
 
-    void generateGridlines(DistantElement& gridlines, int count) {
+    void generateGridlines(DistantElement& gridlines, int count)
+    {
         std::uniform_real_distribution<float> yDist(0.0f, SCREEN_HEIGHT * 0.8f);
         std::uniform_real_distribution<float> lengthDist(100.0f, SCREEN_WIDTH * 0.8f);
         std::uniform_real_distribution<float> xDist(0.0f, SCREEN_WIDTH);
 
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < count; i++)
+        {
             float x = xDist(rng);
             float y = yDist(rng);
             float length = lengthDist(rng);
 
             // Horizontal or vertical line
-            if (i % 2 == 0) {
+            if (i % 2 == 0)
+            {
                 // Horizontal
                 gridlines.points.push_back({x, y});
                 gridlines.points.push_back({x + length, y});
-            } else {
+            }
+            else
+            {
                 // Vertical
                 gridlines.points.push_back({x, y});
                 gridlines.points.push_back({x, y + length});
@@ -302,7 +326,8 @@ private:
         }
     }
 
-    void generateTechStructures(DistantElement& structures) {
+    void generateTechStructures(DistantElement& structures)
+    {
         std::uniform_real_distribution<float> widthDist(40.0f, 120.0f);
         std::uniform_real_distribution<float> heightDist(50.0f, 200.0f);
         std::uniform_int_distribution<int> countDist(5, 15);
@@ -311,7 +336,8 @@ private:
         int count = countDist(rng);
         float baseY = SCREEN_HEIGHT * 0.75f;
 
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < count; i++)
+        {
             float x = xDist(rng);
             float width = widthDist(rng);
             float height = heightDist(rng);
@@ -328,31 +354,40 @@ private:
     }
 
 public:
-    void update(float deltaTime) {
+    void update(float deltaTime)
+    {
         time += deltaTime;
 
         // Update cloud positions
-        for (auto& layer : cloudLayers) {
-            for (auto& cloud : layer.clouds) {
+        for (auto& layer : cloudLayers)
+        {
+            for (auto& cloud : layer.clouds)
+            {
                 cloud.x += layer.speed;
 
                 // Wrap around when outside screen
-                if (cloud.x > SCREEN_WIDTH + cloud.width) {
+                if (cloud.x > SCREEN_WIDTH + cloud.width)
+                {
                     cloud.x = -cloud.width;
                 }
             }
         }
     }
 
-    void draw() {
+    void draw()
+    {
         // Draw sky gradient
         DrawRectangleGradientV(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, skyTopColor, skyBottomColor);
 
         // Draw distant elements
-        for (const auto& element : distantElements) {
+        for (const auto& element : distantElements)
+        {
             // Stars
-            if (currentTheme == THEME_NIGHT && element.color.r == 255 && element.color.g == 255 && element.color.b == 255) {
-                for (const auto& point : element.points) {
+            if (currentTheme == THEME_NIGHT && element.color.r == 255 && element.color.g == 255 && element.color.b ==
+                255)
+            {
+                for (const auto& point : element.points)
+                {
                     // Twinkle effect
                     float brightness = 0.7f + 0.3f * sin(time * 2.0f + point.x * 0.1f + point.y * 0.1f);
                     Color starColor = {
@@ -365,9 +400,12 @@ public:
                 }
             }
             // Grid lines
-            else if (currentTheme == THEME_BATTLEFIELD && element.color.r == 0 && element.color.g == 229) {
-                for (size_t i = 0; i < element.points.size(); i += 2) {
-                    if (i + 1 < element.points.size()) {
+            else if (currentTheme == THEME_BATTLEFIELD && element.color.r == 0 && element.color.g == 229)
+            {
+                for (size_t i = 0; i < element.points.size(); i += 2)
+                {
+                    if (i + 1 < element.points.size())
+                    {
                         DrawLineEx(
                             element.points[i],
                             element.points[i + 1],
@@ -378,14 +416,18 @@ public:
                 }
             }
             // Tech structures
-            else if (currentTheme == THEME_BATTLEFIELD && element.color.r == 66) {
+            else if (currentTheme == THEME_BATTLEFIELD && element.color.r == 66)
+            {
                 Vector2 buildingPoints[4];
                 int pointIndex = 0;
 
-                for (size_t i = 0; i < element.points.size(); i++) {
-                    if (element.points[i].x < 0) {
+                for (size_t i = 0; i < element.points.size(); i++)
+                {
+                    if (element.points[i].x < 0)
+                    {
                         // Separator, draw previous building
-                        if (pointIndex == 4) {
+                        if (pointIndex == 4)
+                        {
                             DrawTriangle(
                                 buildingPoints[0],
                                 buildingPoints[1],
@@ -400,19 +442,24 @@ public:
                             );
                         }
                         pointIndex = 0;
-                    } else {
-                        if (pointIndex < 4) {
+                    }
+                    else
+                    {
+                        if (pointIndex < 4)
+                        {
                             buildingPoints[pointIndex++] = element.points[i];
                         }
                     }
                 }
             }
             // Hills and mountains
-            else {
+            else
+            {
                 Vector2* points = new Vector2[element.points.size() + 2];
                 int pointCount = 0;
 
-                for (const auto& point : element.points) {
+                for (const auto& point : element.points)
+                {
                     points[pointCount++] = point;
                 }
 
@@ -427,8 +474,10 @@ public:
         }
 
         // Draw clouds
-        for (const auto& layer : cloudLayers) {
-            for (const auto& cloud : layer.clouds) {
+        for (const auto& layer : cloudLayers)
+        {
+            for (const auto& cloud : layer.clouds)
+            {
                 // Draw multiple circles for fluffy cloud effect
                 float baseRadius = cloud.height * 0.5f;
 
@@ -472,7 +521,8 @@ public:
 Background background;
 
 // Add methods to change the theme
-void CycleBackgroundTheme() {
+void CycleBackgroundTheme()
+{
     background.setRandomTheme();
 }
 
@@ -695,19 +745,22 @@ void UpdateGame()
     {
     case GameState::TITLE_SCREEN:
         // Character style selection
-            if (IsKeyPressed(KEY_ONE) && players.size() >= 2) {
-                // Cycle player 1 style
-                int currentStyle = static_cast<int>(players[0]->characterStyle);
-                currentStyle = (currentStyle + 1) % 5; // 5 styles total
+        if (IsKeyPressed(KEY_ONE) && players.size() >= 2)
+        {
+            // Cycle player 1 style
+            int currentStyle = static_cast<int>(players[0]->characterStyle);
+            currentStyle = (currentStyle + 1) % 5; // 5 styles total
 
-                players[0]->characterStyle = static_cast<CharacterStyle>(currentStyle);
+            players[0]->characterStyle = static_cast<CharacterStyle>(currentStyle);
 
-                // Recreate visuals with new style
-                delete players[0]->visuals;
-                players[0]->visuals = new CharacterVisuals(players[0], players[0]->characterStyle, players[0]->color, WHITE);
-            }
+            // Recreate visuals with new style
+            delete players[0]->visuals;
+            players[0]->visuals = new
+                CharacterVisuals(players[0], players[0]->characterStyle, players[0]->color, WHITE);
+        }
 
-        if (IsKeyPressed(KEY_TWO) && players.size() >= 2) {
+        if (IsKeyPressed(KEY_TWO) && players.size() >= 2)
+        {
             // Cycle player 2 style
             int currentStyle = static_cast<int>(players[1]->characterStyle);
             currentStyle = (currentStyle + 1) % 5; // 5 styles total
@@ -716,22 +769,25 @@ void UpdateGame()
 
             // Recreate visuals with new style
             delete players[1]->visuals;
-            players[1]->visuals = new CharacterVisuals(players[1], players[1]->characterStyle, players[1]->color, WHITE);
+            players[1]->visuals = new
+                CharacterVisuals(players[1], players[1]->characterStyle, players[1]->color, WHITE);
         }
 
-        // Difficulty selection (keep your existing code)
+    // Difficulty selection (keep your existing code)
         if (IsKeyPressed(KEY_ONE)) difficultyLevel = 0.2f;
         if (IsKeyPressed(KEY_TWO)) difficultyLevel = 0.5f;
         if (IsKeyPressed(KEY_THREE)) difficultyLevel = 0.8f;
         if (IsKeyPressed(KEY_FOUR)) difficultyLevel = 1.0f;
 
-        // Background cycle
-        if (IsKeyPressed(KEY_B)) {
+    // Background cycle
+        if (IsKeyPressed(KEY_B))
+        {
             CycleBackgroundTheme();
         }
 
-        // Game start
-        if (IsKeyPressed(KEY_ENTER)) {
+    // Game start
+        if (IsKeyPressed(KEY_ENTER))
+        {
             gameState.changeState(GameState::GAME_START);
         }
         break;
@@ -1206,15 +1262,8 @@ void DrawGame()
             DrawText("Can you defeat the AI or challenge your friends online?",
                      SCREEN_WIDTH / 2 - 270, SCREEN_HEIGHT - 80, 20, WHITE);
 
-            // Character style selection
-            DrawText("Character Styles:", SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT - 200, 20, WHITE);
-
-            // Display current styles
-            const char* styleNames[] = {"Brawler", "Speedy", "Heavy", "Sword", "Custom"};
-
             // Add the background theme info
             DrawText("Press B to change background theme", SCREEN_WIDTH / 2 - 200, SCREEN_HEIGHT - 80, 20, WHITE);
-
         }
         break;
 

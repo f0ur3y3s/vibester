@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
-EnhancedAIState::EnhancedAIState() {
+EnhancedAIState::EnhancedAIState()
+{
     currentState = NEUTRAL;
     stateTimer = 0;
     decisionDelay = 3;
@@ -63,35 +64,43 @@ EnhancedAIState::EnhancedAIState() {
     damageAdvantage = 0.0f;
 }
 
-void EnhancedAIState::UpdateState(Character* enemy, Character* player, int frameCount) {
+void EnhancedAIState::UpdateState(Character* enemy, Character* player, int frameCount)
+{
     // Update player history for pattern recognition
     // Track player attack history (limit to last 10)
-    if (player->stateManager.isAttacking && player->stateManager.attackFrame == 0) {
+    if (player->stateManager.isAttacking && player->stateManager.attackFrame == 0)
+    {
         lastPlayerAttacks.push_front(static_cast<int>(player->stateManager.currentAttack));
-        if (lastPlayerAttacks.size() > 10) {
+        if (lastPlayerAttacks.size() > 10)
+        {
             lastPlayerAttacks.pop_back();
         }
     }
 
     // Track player position history (every 10 frames, last 60 frames)
-    if (frameCount % 10 == 0) {
+    if (frameCount % 10 == 0)
+    {
         playerPositionHistory.push_front(std::make_pair(player->physics.position, frameCount));
-        if (playerPositionHistory.size() > 6) {
+        if (playerPositionHistory.size() > 6)
+        {
             playerPositionHistory.pop_back();
         }
     }
 
     // Track player state history
-    if (frameCount % 5 == 0 || player->stateManager.state != playerStateHistory.front()) {
+    if (frameCount % 5 == 0 || player->stateManager.state != playerStateHistory.front())
+    {
         playerStateHistory.push_front(player->stateManager.state);
-        if (playerStateHistory.size() > 20) {
+        if (playerStateHistory.size() > 20)
+        {
             playerStateHistory.pop_back();
         }
     }
 
     // Increment attack counter if player just started an attack
-    if (player->stateManager.isAttacking && player->stateManager.attackFrame == 0 && 
-        player->stateManager.currentAttack != AttackType::NONE) {
+    if (player->stateManager.isAttacking && player->stateManager.attackFrame == 0 &&
+        player->stateManager.currentAttack != AttackType::NONE)
+    {
         playerAttackFrequency[static_cast<int>(player->stateManager.currentAttack)]++;
     }
 
@@ -104,21 +113,30 @@ void EnhancedAIState::UpdateState(Character* enemy, Character* player, int frame
     adaptiveTimer++;
 }
 
-void EnhancedAIState::AnalyzePlayerPatterns() {
+void EnhancedAIState::AnalyzePlayerPatterns()
+{
     // Analyze player's movement tendencies
     int groundStates = 0;
     int aerialStates = 0;
     int shieldStates = 0;
     int rollStates = 0;
 
-    for (auto state : playerStateHistory) {
-        if (state == IDLE || state == RUNNING) {
+    for (auto state : playerStateHistory)
+    {
+        if (state == IDLE || state == RUNNING)
+        {
             groundStates++;
-        } else if (state == JUMPING || state == FALLING) {
+        }
+        else if (state == JUMPING || state == FALLING)
+        {
             aerialStates++;
-        } else if (state == SHIELDING) {
+        }
+        else if (state == SHIELDING)
+        {
             shieldStates++;
-        } else if (state == DODGING) {
+        }
+        else if (state == DODGING)
+        {
             rollStates++;
         }
     }
@@ -131,13 +149,15 @@ void EnhancedAIState::AnalyzePlayerPatterns() {
 
     // Calculate player aggression level
     int totalAttacks = 0;
-    for (auto& pair : playerAttackFrequency) {
+    for (auto& pair : playerAttackFrequency)
+    {
         totalAttacks += pair.second;
     }
 
     // Adjust aggression level based on attack frequency and movement
     playerAggressionLevel = std::min(1.0f, (float)totalAttacks / 50.0f);
-    if (playerFavorsAerial) {
+    if (playerFavorsAerial)
+    {
         playerAggressionLevel += 0.2f;
     }
     playerAggressionLevel = std::min(1.0f, playerAggressionLevel);
@@ -148,11 +168,13 @@ void EnhancedAIState::AnalyzePlayerPatterns() {
 }
 
 bool EnhancedAIState::DetectPlayerHabit(const std::deque<CharacterState>& history,
-                                      CharacterState state, float threshold) {
+                                        CharacterState state, float threshold)
+{
     if (history.size() < 5) return false;
 
     int count = 0;
-    for (auto s : history) {
+    for (auto s : history)
+    {
         if (s == state) count++;
     }
 

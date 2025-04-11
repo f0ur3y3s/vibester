@@ -16,7 +16,8 @@
 class Character;
 
 // Character class - enhanced for Smash Bros style
-class Character {
+class Character
+{
 public:
     // Basic properties
     float width;
@@ -25,7 +26,7 @@ public:
     Color color;
     std::string name;
     CharacterVisuals* visuals;
-    CharacterStyle characterStyle;  // Note: using visualStyle instead of characterStyle
+    CharacterStyle characterStyle; // Note: using visualStyle instead of characterStyle
 
     // Core systems
     CharacterPhysics physics;
@@ -34,33 +35,34 @@ public:
     float lastTrailTime;
 
     // Smash-style properties
-    float damagePercent;    // Damage as percentage (0-999%)
-    int stocks;             // Lives remaining
-    
+    float damagePercent; // Damage as percentage (0-999%)
+    int stocks; // Lives remaining
+
     // Visual elements
-    int currentFrame;       // Animation tracking
+    int currentFrame; // Animation tracking
     int framesCounter;
     int framesSpeed;
-    
+
     // Death animation properties
     float deathRotation;
     float deathScale;
     Vector2 deathVelocity;
     Vector2 deathPosition;
-    
+
     // Grab reference
     Character* grabbedCharacter;
-    
+
     // Visual effects
     std::vector<HitEffect> hitEffects;
     std::vector<AttackBox> attacks;
-    
+
     // Explosion state
     std::vector<Particle> explosionParticles;
 
     // Constructor
     // Add to the constructor parameters:
-    Character(float x, float y, float w, float h, float spd, Color col, std::string n, CharacterStyle style = STYLE_BRAWLER);
+    Character(float x, float y, float w, float h, float spd, Color col, std::string n,
+              CharacterStyle style = STYLE_BRAWLER);
 
     // Add to the destructor:
     ~Character();

@@ -9,7 +9,8 @@
 using ::CharacterState;
 using ::AttackType ;
 
-class CharacterStateManager {
+class CharacterStateManager
+{
 public:
     CharacterStateManager()
         : state(CharacterState::IDLE),
@@ -42,7 +43,9 @@ public:
           specialSideCD(90),
           specialUpCD(60),
           specialDownCD(120),
-          dodgeCD(GameConfig::DODGE_COOLDOWN) {}
+          dodgeCD(GameConfig::DODGE_COOLDOWN)
+    {
+    }
 
     void changeState(CharacterState newState);
     bool canChangeState(CharacterState newState) const;
@@ -66,12 +69,12 @@ public:
     int hitstunFrames;
     bool isInvincible;
     int invincibilityFrames;
-    
+
     // Grab state
     bool isGrabbing;
     int grabDuration;
     int grabFrame;
-    
+
     // Death and explosion state
     bool isDying;
     bool isExploding;
@@ -79,12 +82,12 @@ public:
     int deathDuration;
     int explosionFrame;
     int explosionDuration;
-    
+
     // Attack state
     AttackType currentAttack;
     int attackDuration;
     int attackFrame;
-    
+
     // Cooldowns
     Cooldown specialNeutralCD;
     Cooldown specialSideCD;

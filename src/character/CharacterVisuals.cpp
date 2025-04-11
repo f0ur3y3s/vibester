@@ -150,7 +150,75 @@ void CharacterVisuals::setupCommonAnimations() {
     }
     animations["falling"] = falling;
 
-    // Placeholder animations for other states
+    // Jab attack animation
+    Animation jab;
+    jab.loops = false;
+    for (int i = 0; i < 3; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 256, 64, 64};
+        frame.duration = 0.05f;
+        frame.offset = {0, 0};
+
+        // Mark the middle frame as active hit
+        if (i == 1) {
+            frame.isHitActive = true;
+            frame.hitboxOffset = {32, 0};
+            frame.hitboxSize = {30, 20};
+        }
+
+        jab.frames.push_back(frame);
+        jab.totalDuration += frame.duration;
+    }
+    animations["jab"] = jab;
+
+    // Forward tilt animation
+    Animation ftilt;
+    ftilt.loops = false;
+    for (int i = 0; i < 4; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 320, 64, 64};
+        frame.duration = 0.07f;
+        frame.offset = {i == 2 ? 10.0f : 0, 0};
+
+        // Mark hit active frames
+        if (i == 2) {
+            frame.isHitActive = true;
+            frame.hitboxOffset = {35, 0};
+            frame.hitboxSize = {40, 30};
+        }
+
+        ftilt.frames.push_back(frame);
+        ftilt.totalDuration += frame.duration;
+    }
+    animations["ftilt"] = ftilt;
+
+    // Neutral air animation
+    Animation nair;
+    nair.loops = false;
+    for (int i = 0; i < 5; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 384, 64, 64};
+        frame.duration = 0.06f;
+        frame.offset = {0, 0};
+
+        // Middle frames have active hit
+        if (i >= 1 && i <= 3) {
+            frame.isHitActive = true;
+            frame.hitboxOffset = {0, 0};
+            frame.hitboxSize = {60, 60}; // Circular hitbox
+        }
+
+        nair.frames.push_back(frame);
+        nair.totalDuration += frame.duration;
+    }
+    animations["nair"] = nair;
+
+    // Add all other required animations with basic placeholder frames
+    setupPlaceholderAnimations();
+}
+
+void CharacterVisuals::setupPlaceholderAnimations() {
+    // Create placeholder for other attack animations
     Animation placeholder;
     placeholder.loops = false;
     AnimationFrame frame;
@@ -160,82 +228,249 @@ void CharacterVisuals::setupCommonAnimations() {
     placeholder.frames.push_back(frame);
     placeholder.totalDuration = frame.duration;
 
-    // Add placeholder animations for common states
-    animations["shield"] = placeholder;
-    animations["hitstun"] = placeholder;
-    animations["dying"] = placeholder;
-    animations["charge"] = placeholder;
-    animations["spotdodge"] = placeholder;
-    animations["forwarddodge"] = placeholder;
-    animations["backdodge"] = placeholder;
-    animations["grab"] = placeholder;
+    // Add placeholder animations for all states we haven't manually defined
+    const std::string animationNames[] = {
+        "shield", "hitstun", "dying", "charge", "spotdodge", "forwarddodge", "backdodge", "grab",
+        "utilt", "dtilt", "dash", "fsmash", "usmash", "dsmash", "fair", "bair", "uair", "dair",
+        "nspecial", "sspecial", "uspecial", "dspecial", "pummel", "fthrow", "bthrow", "uthrow", "dthrow"
+    };
 
-    // Add placeholder animations for attacks
-    animations["jab"] = placeholder;
-    animations["ftilt"] = placeholder;
-    animations["utilt"] = placeholder;
-    animations["dtilt"] = placeholder;
-    animations["fsmash"] = placeholder;
-    animations["usmash"] = placeholder;
-    animations["dsmash"] = placeholder;
-    animations["nair"] = placeholder;
-    animations["fair"] = placeholder;
-    animations["bair"] = placeholder;
-    animations["uair"] = placeholder;
-    animations["dair"] = placeholder;
-    animations["nspecial"] = placeholder;
-    animations["sspecial"] = placeholder;
-    animations["uspecial"] = placeholder;
-    animations["dspecial"] = placeholder;
+    for (const auto& name : animationNames) {
+        if (animations.find(name) == animations.end()) {
+            animations[name] = placeholder;
+        }
+    }
 }
 
 // Style-specific animation setups
 void CharacterVisuals::setupBrawlerAnimations() {
-    // In a real implementation, these would load style-specific animation frames
-    // For now, we'll just ensure all animations exist
-
-    // Example: Jab with active hitbox
-    Animation jab;
-    jab.loops = false;
-    for (int i = 0; i < 3; i++) {
-        AnimationFrame frame;
-        frame.sourceRect = {i * 64.0f, 256, 64, 64};
-        frame.duration = 0.05f;
-        frame.offset = {0, 0};
-
-        // Second frame has active hit
-        if (i == 1) {
-            frame.isHitActive = true;
-            frame.hitboxOffset = {32, 0};
-            frame.hitboxSize = {30, 20};
-        } else {
-            frame.isHitActive = false;
-        }
-
-        jab.frames.push_back(frame);
-        jab.totalDuration += frame.duration;
+    // Enhance brawler jab animation
+    if (animations.find("jab") != animations.end()) {
+        animations["jab"].frames[1].hitboxOffset = {40, 0};
+        animations["jab"].frames[1].hitboxSize = {35, 25};
     }
-    animations["jab"] = jab;
+
+    // Enhance forward smash for brawler
+    Animation fsmash;
+    fsmash.loops = false;
+
+    // Windup frames
+    for (int i = 0; i < 2; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 448, 64, 64};
+        frame.duration = 0.08f;
+        frame.offset = {i == 1 ? -10.0f : 0, 0}; // Pull back before punch
+        frame.isHitActive = false;
+        fsmash.frames.push_back(frame);
+        fsmash.totalDuration += frame.duration;
+    }
+
+    // Active hit frames
+    for (int i = 2; i < 4; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 448, 64, 64};
+        frame.duration = 0.06f;
+        frame.offset = {20.0f, 0}; // Extend forward for punch
+        frame.isHitActive = true;
+        frame.hitboxOffset = {45, 0};
+        frame.hitboxSize = {50, 40};
+        fsmash.frames.push_back(frame);
+        fsmash.totalDuration += frame.duration;
+    }
+
+    // End lag frames
+    for (int i = 4; i < 5; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 448, 64, 64};
+        frame.duration = 0.12f;
+        frame.offset = {0, 0};
+        frame.isHitActive = false;
+        fsmash.frames.push_back(frame);
+        fsmash.totalDuration += frame.duration;
+    }
+
+    animations["fsmash"] = fsmash;
 }
 
 void CharacterVisuals::setupSpeedyAnimations() {
-    // Faster animations for speedy character
-    // Placeholder implementation
+    // Create unique speed character animations
+
+    // Speed character's neutral air is a quick spin
+    Animation nair;
+    nair.loops = false;
+
+    for (int i = 0; i < 6; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 384, 64, 64};
+        frame.duration = 0.04f; // Faster animation
+        frame.offset = {0, 0};
+
+        // Active on frames 1-4
+        if (i >= 1 && i <= 4) {
+            frame.isHitActive = true;
+            frame.hitboxOffset = {0, 0};
+            frame.hitboxSize = {70, 40}; // Wide hitbox for spin
+        }
+
+        nair.frames.push_back(frame);
+        nair.totalDuration += frame.duration;
+    }
+
+    animations["nair"] = nair;
+
+    // Speedy up special is a quick recovery move
+    Animation uspecial;
+    uspecial.loops = false;
+
+    for (int i = 0; i < 5; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 512, 64, 64};
+        frame.duration = 0.05f;
+        frame.offset = {0, i > 0 ? -15.0f : 0}; // Move upward during animation
+
+        if (i >= 1 && i <= 3) {
+            frame.isHitActive = true;
+            frame.hitboxOffset = {0, -20};
+            frame.hitboxSize = {40, 60};
+        }
+
+        uspecial.frames.push_back(frame);
+        uspecial.totalDuration += frame.duration;
+    }
+
+    animations["uspecial"] = uspecial;
 }
 
 void CharacterVisuals::setupHeavyAnimations() {
-    // Slower, stronger animations for heavy character
-    // Placeholder implementation
+    // Heavy character animations are slower but more powerful
+
+    // Heavy down smash is a ground pound
+    Animation dsmash;
+    dsmash.loops = false;
+
+    // Windup
+    for (int i = 0; i < 2; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 576, 64, 64};
+        frame.duration = 0.1f; // Slower windup
+        frame.offset = {0, i == 1 ? -10.0f : 0}; // Jump up slightly
+        frame.isHitActive = false;
+        dsmash.frames.push_back(frame);
+        dsmash.totalDuration += frame.duration;
+    }
+
+    // Impact
+    for (int i = 2; i < 4; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 576, 64, 64};
+        frame.duration = 0.08f;
+        frame.offset = {0, 5.0f}; // Land with impact
+        frame.isHitActive = true;
+        frame.hitboxOffset = {0, 30};
+        frame.hitboxSize = {80, 20}; // Wide, flat hitbox
+        dsmash.frames.push_back(frame);
+        dsmash.totalDuration += frame.duration;
+    }
+
+    // End lag
+    AnimationFrame endFrame;
+    endFrame.sourceRect = {4 * 64.0f, 576, 64, 64};
+    endFrame.duration = 0.15f;
+    endFrame.offset = {0, 0};
+    endFrame.isHitActive = false;
+    dsmash.frames.push_back(endFrame);
+    dsmash.totalDuration += endFrame.duration;
+
+    animations["dsmash"] = dsmash;
 }
 
 void CharacterVisuals::setupSwordAnimations() {
-    // Animations with longer range for sword character
-    // Placeholder implementation
+    // Sword character has long range but slower attacks
+
+    // Forward air is a sword slash
+    Animation fair;
+    fair.loops = false;
+
+    for (int i = 0; i < 5; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 640, 64, 64};
+        frame.duration = 0.06f;
+        frame.offset = {i == 2 ? 15.0f : 0, 0};
+
+        if (i == 2 || i == 3) {
+            frame.isHitActive = true;
+            frame.hitboxOffset = {50, 0};
+            frame.hitboxSize = {70, 30}; // Long sword hitbox
+        }
+
+        fair.frames.push_back(frame);
+        fair.totalDuration += frame.duration;
+    }
+
+    animations["fair"] = fair;
+
+    // Down tilt is a low sword sweep
+    Animation dtilt;
+    dtilt.loops = false;
+
+    for (int i = 0; i < 4; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 704, 64, 64};
+        frame.duration = 0.07f;
+        frame.offset = {i == 2 ? 10.0f : 0, 0};
+
+        if (i == 1 || i == 2) {
+            frame.isHitActive = true;
+            frame.hitboxOffset = {30, 30};
+            frame.hitboxSize = {80, 20}; // Low-hitting sword sweep
+        }
+
+        dtilt.frames.push_back(frame);
+        dtilt.totalDuration += frame.duration;
+    }
+
+    animations["dtilt"] = dtilt;
 }
 
 void CharacterVisuals::setupCustomAnimations() {
-    // Custom character animations
-    // Placeholder implementation
+    // Custom character has unique properties mixing other styles
+
+    // Neutral special is a charge-and-release projectile
+    Animation nspecial;
+    nspecial.loops = false;
+
+    // Charge frames
+    for (int i = 0; i < 3; i++) {
+        AnimationFrame frame;
+        frame.sourceRect = {i * 64.0f, 768, 64, 64};
+        frame.duration = 0.1f;
+        frame.offset = {0, 0};
+        frame.isHitActive = false;
+        nspecial.frames.push_back(frame);
+        nspecial.totalDuration += frame.duration;
+    }
+
+    // Release frame
+    AnimationFrame releaseFrame;
+    releaseFrame.sourceRect = {3 * 64.0f, 768, 64, 64};
+    releaseFrame.duration = 0.08f;
+    releaseFrame.offset = {10.0f, 0};
+    releaseFrame.isHitActive = true;
+    releaseFrame.hitboxOffset = {40, 0};
+    releaseFrame.hitboxSize = {30, 30}; // Projectile hitbox
+    nspecial.frames.push_back(releaseFrame);
+    nspecial.totalDuration += releaseFrame.duration;
+
+    // End lag
+    AnimationFrame endFrame;
+    endFrame.sourceRect = {4 * 64.0f, 768, 64, 64};
+    endFrame.duration = 0.12f;
+    endFrame.offset = {0, 0};
+    endFrame.isHitActive = false;
+    nspecial.frames.push_back(endFrame);
+    nspecial.totalDuration += endFrame.duration;
+
+    animations["nspecial"] = nspecial;
 }
 
 // Set current animation
@@ -532,10 +767,7 @@ void CharacterVisuals::draw(Vector2 position, float width, float height, float d
         position.y + frame.offset.y
     };
 
-    // For now, draw a colored rectangle since we don't have actual sprites
-    // In the actual implementation, you would draw the sprite instead
-
-    // Draw character shadow
+    // Draw shadow underneath character
     DrawEllipse(
         position.x,
         position.y + height/2 + 5,
@@ -544,166 +776,22 @@ void CharacterVisuals::draw(Vector2 position, float width, float height, float d
         Color{0, 0, 0, 100}
     );
 
-    // Draw character body
-    Rectangle bodyRect = {
-        drawPos.x - width/2,
-        drawPos.y - height,
-        width,
-        height
-    };
-
-    // Mix color with damage glow
-    Color drawColor = mainColor;
-    drawColor.r = Lerp(mainColor.r, 255, damageGlow);
-    drawColor.g = Lerp(mainColor.g, 100, damageGlow);
-    drawColor.b = Lerp(mainColor.b, 100, damageGlow);
-
-    // Draw main body
-    DrawRectangleRounded(bodyRect, 0.3f, 8, drawColor);
-
-    // Draw head (slightly larger for cartoon look)
-    Rectangle headRect = {
-        drawPos.x - width/2 * 0.8f,
-        drawPos.y - height - width/2 * 0.8f,
-        width * 0.8f,
-        width * 0.8f
-    };
-    DrawRectangleRounded(headRect, 0.5f, 8, drawColor);
-
-    // Draw eyes
-    float eyeSize = width * 0.15f;
-    float eyeX = drawPos.x - (facingLeft ? -eyeSize : eyeSize);
-    Rectangle eyeRect = {
-        eyeX - eyeSize/2,
-        drawPos.y - height - width/2 * 0.8f + width * 0.25f,
-        eyeSize,
-        eyeSize
-    };
-    DrawRectangleRounded(eyeRect, 0.8f, 8, BLACK);
-
-    // Draw secondary details based on character style
+    // Draw character based on style
     switch (style) {
-        case STYLE_BRAWLER: {
-            // Draw brawler details (e.g., cap, gloves)
-            Rectangle capRect = {
-                drawPos.x - width/2 * 0.8f,
-                drawPos.y - height - width/2 * 0.8f - 5,
-                width * 0.8f,
-                10
-            };
-            DrawRectangleRounded(capRect, 0.3f, 8, secondaryColor);
-
-            // Draw hands/gloves when attacking
-            if (currentAnimation == "jab" ||
-                currentAnimation == "fsmash" ||
-                currentAnimation == "usmash" ||
-                currentAnimation == "dsmash") {
-                float handSize = width * 0.3f;
-                float handX = drawPos.x + (facingLeft ? -width/2 - handSize : width/2);
-                Rectangle handRect = {
-                    handX,
-                    drawPos.y - height * 0.5f,
-                    handSize,
-                    handSize
-                };
-                DrawRectangleRounded(handRect, 0.8f, 8, secondaryColor);
-            }
+        case STYLE_BRAWLER:
+            drawBrawlerCharacter(drawPos, width, height, damageGlow);
             break;
-        }
-        case STYLE_SPEEDY: {
-            // Draw speedy details (e.g., ears, tail)
-            // Ears
-            Rectangle leftEarRect = {
-                drawPos.x - width/2 * 0.6f - 5,
-                drawPos.y - height - width/2 * 0.8f - 15,
-                10,
-                20
-            };
-            DrawRectangleRounded(leftEarRect, 0.5f, 8, secondaryColor);
-
-            Rectangle rightEarRect = {
-                drawPos.x + width/2 * 0.6f - 5,
-                drawPos.y - height - width/2 * 0.8f - 15,
-                10,
-                20
-            };
-            DrawRectangleRounded(rightEarRect, 0.5f, 8, secondaryColor);
-
-            // Tail
-            Rectangle tailRect = {
-                drawPos.x - (facingLeft ? width/2 : -width/2),
-                drawPos.y - height * 0.3f,
-                width * 0.5f,
-                10
-            };
-            DrawRectangleRounded(tailRect, 0.8f, 8, secondaryColor);
+        case STYLE_SPEEDY:
+            drawSpeedyCharacter(drawPos, width, height, damageGlow);
             break;
-        }
-        case STYLE_HEAVY: {
-            // Draw heavy details (e.g., shell, spikes)
-            Rectangle shellRect = {
-                drawPos.x - width/2 * 0.9f,
-                drawPos.y - height * 0.9f,
-                width * 0.9f,
-                height * 0.5f
-            };
-            DrawRectangleRounded(shellRect, 0.3f, 8, secondaryColor);
-
-            // Spikes
-            for (int i = 0; i < 3; i++) {
-                Rectangle spikeRect = {
-                    drawPos.x - width/2 * 0.7f + i * (width * 0.3f),
-                    drawPos.y - height * 0.9f - 10,
-                    10,
-                    10
-                };
-                DrawRectangleRounded(spikeRect, 0.5f, 8, Color{120, 60, 20, 255});
-            }
+        case STYLE_HEAVY:
+            drawHeavyCharacter(drawPos, width, height, damageGlow);
             break;
-        }
-        case STYLE_SWORD: {
-            // Draw sword details (e.g., hat, sword)
-Rectangle hatRect = {
-                drawPos.x - width/2 * 0.9f,
-                drawPos.y - height - width/2 * 0.8f - 5,
-                width * 0.9f,
-                15
-            };
-            DrawRectangleRounded(hatRect, 0.3f, 8, secondaryColor);
-
-            // Draw sword when attacking
-            if (currentAnimation.find("attack") != std::string::npos ||
-                currentAnimation.find("air") != std::string::npos ||
-                currentAnimation.find("smash") != std::string::npos ||
-                currentAnimation.find("tilt") != std::string::npos ||
-                currentAnimation.find("special") != std::string::npos) {
-
-                float swordLength = width * 1.2f;
-                float swordWidth = 8;
-                float swordX = drawPos.x + (facingLeft ? -width/2 - swordLength : width/2);
-
-                // Sword blade
-                Rectangle swordRect = {
-                    swordX,
-                    drawPos.y - height * 0.6f,
-                    swordLength,
-                    swordWidth
-                };
-                DrawRectangleRounded(swordRect, 0.1f, 8, LIGHTGRAY);
-
-                // Sword handle
-                Rectangle handleRect = {
-                    drawPos.x + (facingLeft ? -width/2 - 15 : width/2),
-                    drawPos.y - height * 0.6f - 10,
-                    15,
-                    30
-                };
-                DrawRectangleRounded(handleRect, 0.5f, 8, DARKBROWN);
-            }
+        case STYLE_SWORD:
+            drawSwordCharacter(drawPos, width, height, damageGlow);
             break;
-        }
         case STYLE_CUSTOM:
-            // Custom style details
+            drawCustomCharacter(drawPos, width, height, damageGlow);
             break;
     }
 
@@ -786,6 +874,445 @@ Rectangle hatRect = {
             }
         }
     }
+
+    // Draw hitbox visualization for debug purposes
+    if (frame.isHitActive) {
+        Vector2 hitboxPos = {
+            drawPos.x + (facingLeft ? -frame.hitboxOffset.x : frame.hitboxOffset.x),
+            drawPos.y + frame.hitboxOffset.y
+        };
+
+        // Visual representation of active hitbox - semi-transparent
+        Color hitboxColor = {255, 0, 0, 100};
+        DrawRectangle(
+            hitboxPos.x - frame.hitboxSize.x/2,
+            hitboxPos.y - frame.hitboxSize.y/2,
+            frame.hitboxSize.x,
+            frame.hitboxSize.y,
+            hitboxColor
+        );
+    }
+}
+
+// Draw brawler character
+// Draw speedy character
+void CharacterVisuals::drawSpeedyCharacter(Vector2 position, float width, float height, float damageGlow) {
+    // Mix color with damage glow
+    Color drawColor = mainColor;
+    drawColor.r = Lerp(mainColor.r, 255, damageGlow);
+    drawColor.g = Lerp(mainColor.g, 100, damageGlow);
+    drawColor.b = Lerp(mainColor.b, 100, damageGlow);
+
+    // Body - slimmer and more aerodynamic
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.7f, position.y - height, width * 0.7f, height},
+        0.5f, 8, drawColor
+    );
+
+    // Head - smaller and more pointed
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.7f, position.y - height - width/2 * 0.7f, width * 0.7f, width * 0.7f},
+        0.8f, 8, drawColor
+    );
+
+    // Pointed ears
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.6f - 5, position.y - height - width/2 * 0.8f - 15, 10, 20},
+        0.5f, 8, secondaryColor
+    );
+
+    DrawRectangleRounded(
+        {position.x + width/2 * 0.6f - 5, position.y - height - width/2 * 0.8f - 15, 10, 20},
+        0.5f, 8, secondaryColor
+    );
+
+    // Face - faster character has sharp eyes
+    float eyeSize = width * 0.12f;
+    float eyeX = position.x - (facingLeft ? -eyeSize*1.5f : eyeSize*1.5f);
+
+    // Angled eyes for speedy look
+    DrawRectangleRounded(
+        {eyeX - eyeSize/2, position.y - height - width/2 * 0.8f + width * 0.25f, eyeSize * 1.5f, eyeSize * 0.7f},
+        0.8f, 8, BLACK
+    );
+
+    // Smirk
+    if (currentAnimation == "running" || currentAnimation.find("air") != std::string::npos) {
+        // Confident smirk when running or in air
+        DrawRectangleRounded(
+            {position.x - width * 0.25f, position.y - height - width/2 * 0.8f + width * 0.5f, width * 0.4f, width * 0.08f},
+            0.8f, 8, BLACK
+        );
+    } else {
+        // Normal smile
+        DrawRectangleRounded(
+            {position.x - width * 0.3f, position.y - height - width/2 * 0.8f + width * 0.5f, width * 0.5f, width * 0.08f},
+            0.8f, 8, BLACK
+        );
+    }
+
+    // Tail for speedy character
+    float tailWidth = width * 0.5f;
+    float tailHeight = 10;
+    float tailX = position.x - (facingLeft ? width/2 : -width/2);
+    float tailY = position.y - height * 0.3f;
+
+    DrawRectangleRounded(
+        {tailX, tailY, tailWidth * (facingLeft ? -1 : 1), tailHeight},
+        0.8f, 8, secondaryColor
+    );
+
+    // Speed boost when running/jumping
+    if (currentAnimation == "running" || currentAnimation == "jumping") {
+        // Speed lines
+        for (int i = 0; i < 3; i++) {
+            float lineLength = width * (0.5f + i * 0.2f);
+            float lineY = position.y - height * (0.3f + i * 0.2f);
+
+            DrawLineEx(
+                {position.x - (facingLeft ? -width/4 : width/4), lineY},
+                {position.x - (facingLeft ? -width/4 - lineLength : width/4 + lineLength), lineY},
+                2.0f,
+                secondaryColor
+            );
+        }
+    }
+}
+
+// Draw heavy character
+void CharacterVisuals::drawHeavyCharacter(Vector2 position, float width, float height, float damageGlow) {
+    // Mix color with damage glow
+    Color drawColor = mainColor;
+    drawColor.r = Lerp(mainColor.r, 255, damageGlow);
+    drawColor.g = Lerp(mainColor.g, 100, damageGlow);
+    drawColor.b = Lerp(mainColor.b, 100, damageGlow);
+
+    // Main body - larger and bulkier
+    DrawRectangleRounded(
+        {position.x - width/2 * 1.2f, position.y - height, width * 1.2f, height},
+        0.2f, 8, drawColor
+    );
+
+    // Shell on back
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.9f, position.y - height * 0.9f, width * 0.9f, height * 0.5f},
+        0.3f, 8, secondaryColor
+    );
+
+    // Spikes on shell
+    for (int i = 0; i < 3; i++) {
+        Rectangle spikeRect = {
+            position.x - width/2 * 0.7f + i * (width * 0.3f),
+            position.y - height * 0.9f - 10,
+            10,
+            10
+        };
+        DrawRectangleRounded(spikeRect, 0.5f, 8, Color{120, 60, 20, 255});
+    }
+
+    // Head - smaller in proportion
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.7f, position.y - height - width/2 * 0.7f, width * 0.7f, width * 0.7f},
+        0.4f, 8, drawColor
+    );
+
+    // Face - angry looking
+    float eyeSize = width * 0.14f;
+    float eyeX = position.x - (facingLeft ? -eyeSize : eyeSize);
+
+    // Angry eyebrows
+    DrawLineEx(
+        {eyeX - eyeSize, position.y - height - width/2 * 0.8f + width * 0.2f},
+        {eyeX, position.y - height - width/2 * 0.8f + width * 0.15f},
+        3.0f,
+        BLACK
+    );
+
+    // Eyes
+    DrawRectangleRounded(
+        {eyeX - eyeSize/2, position.y - height - width/2 * 0.8f + width * 0.25f, eyeSize, eyeSize},
+        0.8f, 8, BLACK
+    );
+
+    // Mouth - snarl
+    if (currentAnimation.find("smash") != std::string::npos) {
+        // Angry snarl during smash attacks
+        DrawRectangleRounded(
+            {position.x - width * 0.2f, position.y - height - width/2 * 0.8f + width * 0.5f, width * 0.4f, width * 0.15f},
+            0.8f, 8, BLACK
+        );
+    } else {
+        // Determined expression
+        DrawRectangleRounded(
+            {position.x - width * 0.3f, position.y - height - width/2 * 0.8f + width * 0.5f, width * 0.6f, width * 0.1f},
+            0.1f, 8, BLACK
+        );
+    }
+
+    // Heavy character has large fists
+    if (currentAnimation.find("attack") != std::string::npos ||
+        currentAnimation.find("smash") != std::string::npos ||
+        currentAnimation == "jab") {
+
+        float fistSize = width * 0.5f;
+        float fistX = position.x + (facingLeft ? -width/2 - fistSize*0.7f : width/2);
+        float fistY = position.y - height * 0.5f;
+
+        // Draw large fist
+        DrawRectangleRounded(
+            {fistX, fistY, fistSize * (facingLeft ? -1 : 1), fistSize},
+            0.5f, 8, drawColor
+        );
+    }
+}
+
+// Draw sword character
+void CharacterVisuals::drawSwordCharacter(Vector2 position, float width, float height, float damageGlow) {
+    // Mix color with damage glow
+    Color drawColor = mainColor;
+    drawColor.r = Lerp(mainColor.r, 255, damageGlow);
+    drawColor.g = Lerp(mainColor.g, 100, damageGlow);
+    drawColor.b = Lerp(mainColor.b, 100, damageGlow);
+
+    // Hero-like body
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.9f, position.y - height, width * 0.9f, height},
+        0.3f, 8, drawColor
+    );
+
+    // Head with hero hat
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.7f, position.y - height - width/2 * 0.7f, width * 0.7f, width * 0.7f},
+        0.5f, 8, drawColor
+    );
+
+    // Hero hat/cap
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.9f, position.y - height - width/2 * 0.8f - 5, width * 0.9f, 15},
+        0.3f, 8, secondaryColor
+    );
+
+    // Face - determined hero look
+    float eyeSize = width * 0.12f;
+    float eyeX = position.x - (facingLeft ? -eyeSize*1.5f : eyeSize*1.5f);
+
+    // Focused eyes
+    DrawRectangleRounded(
+        {eyeX - eyeSize/2, position.y - height - width/2 * 0.8f + width * 0.25f, eyeSize, eyeSize},
+        0.8f, 8, BLACK
+    );
+
+    // Determined expression
+    DrawRectangleRounded(
+        {position.x - width * 0.25f, position.y - height - width/2 * 0.8f + width * 0.5f, width * 0.5f, width * 0.08f},
+        0.5f, 8, BLACK
+    );
+
+    // Draw sword when attacking
+    if (currentAnimation.find("attack") != std::string::npos ||
+        currentAnimation.find("air") != std::string::npos ||
+        currentAnimation.find("smash") != std::string::npos ||
+        currentAnimation.find("tilt") != std::string::npos ||
+        currentAnimation.find("special") != std::string::npos) {
+
+        float swordLength = width * 1.5f;
+        float swordWidth = 8;
+        float swordX = position.x + (facingLeft ? -width/2 - swordLength : width/2);
+        float swordY = position.y - height * 0.6f;
+
+        // Sword handle
+        DrawRectangleRounded(
+            {position.x + (facingLeft ? -width/2 - 15 : width/2), swordY - 10, 15 * (facingLeft ? -1 : 1), 30},
+            0.5f, 8, DARKBROWN
+        );
+
+        // Cross guard
+        DrawRectangleRounded(
+            {position.x + (facingLeft ? -width/2 - 25 : width/2 - 5), swordY - 5, 30 * (facingLeft ? -1 : 1), 10},
+            0.3f, 8, GOLD
+        );
+
+        // Sword blade
+        DrawRectangleRounded(
+            {swordX, swordY, swordLength * (facingLeft ? -1 : 1), swordWidth},
+            0.1f, 8, LIGHTGRAY
+        );
+
+        // Sword tip
+        DrawTriangle(
+            {swordX + (facingLeft ? 0 : swordLength), swordY + swordWidth/2},
+            {swordX + (facingLeft ? -20 : swordLength + 20), swordY + swordWidth/2},
+            {swordX + (facingLeft ? -10 : swordLength + 10), swordY - 5},
+            LIGHTGRAY
+        );
+
+        // Sword glow during special attacks
+        if (currentAnimation.find("special") != std::string::npos) {
+            DrawRectangleRounded(
+                {swordX, swordY, swordLength * (facingLeft ? -1 : 1), swordWidth},
+                0.1f, 8, {220, 220, 255, 150}
+            );
+        }
+    }
+}
+
+// Draw custom character
+void CharacterVisuals::drawCustomCharacter(Vector2 position, float width, float height, float damageGlow) {
+    // Mix color with damage glow
+    Color drawColor = mainColor;
+    drawColor.r = Lerp(mainColor.r, 255, damageGlow);
+    drawColor.g = Lerp(mainColor.g, 100, damageGlow);
+    drawColor.b = Lerp(mainColor.b, 100, damageGlow);
+
+    // Unique mystic-looking body
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.8f, position.y - height, width * 0.8f, height},
+        0.4f, 8, drawColor
+    );
+
+    // Cloak/cape effect
+    if (currentAnimation == "idle" || currentAnimation.find("special") != std::string::npos) {
+        // Draw flowing cape
+        DrawTriangle(
+            {position.x - width/2 * 0.8f, position.y - height * 0.8f},
+            {position.x + width/2 * 0.8f, position.y - height * 0.8f},
+            {position.x, position.y - height * 0.2f},
+            secondaryColor
+        );
+    }
+
+    // Mystical head with glow
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.7f, position.y - height - width/2 * 0.7f, width * 0.7f, width * 0.7f},
+        0.8f, 8, drawColor
+    );
+
+    // Mystic headband/crown
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.8f, position.y - height - width/2 * 0.5f - 5, width * 0.8f, 10},
+        0.5f, 8, secondaryColor
+    );
+
+    // Glowing gem in center of headband
+    DrawCircle(
+        position.x,
+        position.y - height - width/2 * 0.5f,
+        width * 0.1f,
+        PURPLE
+    );
+
+    // Face - mysterious glowing eyes
+    float eyeSize = width * 0.15f;
+    float eyeX = position.x - (facingLeft ? -eyeSize : eyeSize);
+
+    // Glowing eyes
+    Color eyeColor = {180, 100, 255, 255}; // Purple glow
+    DrawCircle(
+        eyeX,
+        position.y - height - width/2 * 0.8f + width * 0.25f,
+        eyeSize/2,
+        eyeColor
+    );
+
+    // No visible mouth - mysterious
+
+    // Energy effects during special attacks
+    if (currentAnimation.find("special") != std::string::npos) {
+        // Energy orb for projectile
+        if (currentAnimation == "nspecial") {
+            float orbSize = width * 0.3f * (1.0f + sin(GetTime() * 5) * 0.2f);
+            float orbX = position.x + (facingLeft ? -width*0.8f : width*0.8f);
+
+            DrawCircle(orbX, position.y - height * 0.5f, orbSize, {180, 100, 255, 180});
+            DrawCircleLines(orbX, position.y - height * 0.5f, orbSize * 1.2f, {220, 140, 255, 150});
+        }
+
+        // Energy aura
+        float time = GetTime() * 3.0f;
+        for (int i = 0; i < 8; i++) {
+            float angle = time + i * 45.0f * DEG2RAD;
+            float distance = width * 0.8f * (0.8f + sin(time * 2.0f + i) * 0.2f);
+            Vector2 pos = {
+                position.x + cos(angle) * distance,
+                position.y - height/2 + sin(angle) * distance
+            };
+
+            DrawCircle(pos.x, pos.y, 5.0f, {180, 100, 255, 150});
+        }
+    }
+}
+
+void CharacterVisuals::drawBrawlerCharacter(Vector2 position, float width, float height, float damageGlow) {
+    // Mix color with damage glow
+    Color drawColor = mainColor;
+    drawColor.r = Lerp(mainColor.r, 255, damageGlow);
+    drawColor.g = Lerp(mainColor.g, 100, damageGlow);
+    drawColor.b = Lerp(mainColor.b, 100, damageGlow);
+
+    // Body - more athletic and rounded
+    DrawRectangleRounded(
+        {position.x - width/2, position.y - height, width, height},
+        0.3f, 8, drawColor
+    );
+
+    // Head - slightly larger for cartoon look
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.8f, position.y - height - width/2 * 0.8f, width * 0.8f, width * 0.8f},
+        0.5f, 8, drawColor
+    );
+
+    // Face - draw based on animation state
+    float eyeSize = width * 0.15f;
+    float eyeX = position.x - (facingLeft ? -eyeSize : eyeSize);
+
+    // Eyes
+    DrawRectangleRounded(
+        {eyeX - eyeSize/2, position.y - height - width/2 * 0.8f + width * 0.25f, eyeSize, eyeSize},
+        0.8f, 8, BLACK
+    );
+
+    // If in hitstun, show shocked expression
+    if (currentAnimation == "hitstun") {
+        // Shocked mouth
+        DrawRectangleRounded(
+            {position.x - width * 0.2f, position.y - height - width/2 * 0.8f + width * 0.5f, width * 0.4f, width * 0.15f},
+            0.8f, 8, BLACK
+        );
+    } else {
+        // Normal mouth - smile
+        DrawRectangleRounded(
+            {position.x - width * 0.3f, position.y - height - width/2 * 0.8f + width * 0.5f, width * 0.6f, width * 0.1f},
+            0.8f, 8, BLACK
+        );
+    }
+
+    // Boxing gloves for attacks
+    if (currentAnimation.find("jab") != std::string::npos ||
+        currentAnimation.find("smash") != std::string::npos) {
+
+        // Lead hand for punch
+        float handSize = width * 0.4f;
+        float handX = position.x + (facingLeft ? -width/2 - handSize : width/2);
+        float handY = position.y - height * 0.5f;
+
+        // Draw boxing glove
+        DrawRectangleRounded(
+            {handX, handY, handSize, handSize},
+            0.8f, 8, secondaryColor
+        );
+    }
+
+    // Boxing cap/hat
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.8f, position.y - height - width/2 * 0.8f - 5, width * 0.8f, 10},
+        0.3f, 8, secondaryColor
+    );
+
+    // Add boxing shorts
+    DrawRectangleRounded(
+        {position.x - width/2 * 0.8f, position.y - height * 0.4f, width * 0.8f, height * 0.2f},
+        0.3f, 4, secondaryColor
+    );
 }
 
 // Draw movement trail
