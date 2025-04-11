@@ -1,6 +1,7 @@
 #include "GameState.h"
 #include "ParticleSystem.h"
 #include <algorithm>
+#include <GameConfig.h>
 
 // Constructor
 GameState::GameState() {
@@ -14,7 +15,7 @@ GameState::GameState() {
     isSuddenDeath = false;
 
     // Default settings
-    settings.stockCount = DEFAULT_STOCKS;
+    settings.stockCount = GameConfig::DEFAULT_STOCKS;
     settings.timeLimit = 180; // 3 minutes
     settings.itemsEnabled = true;
     settings.itemFrequency = 0.5f;
@@ -57,6 +58,39 @@ void GameState::initialize() {
 }
 
 void GameState::update() {
+    stateTimer++;
+
+    if (currentState == GAME_PLAYING && !isPaused) {
+        currentTime++;
+
+        // Check for match time limit if in timed mode
+        if (!isStockMatch && settings.timeLimit > 0) {
+            if (isMatchTimeUp()) {
+                if (getLeadingPlayer() != -1) {
+                    endMatch();
+                } else {
+                    startSuddenDeath();
+                }
+            }
+        }
+
+        // Check for match end conditions (all but one player eliminated)
+        if (isStockMatch && getRemainingPlayers() <= 1) {
+            endMatch();
+        }
+
+        // Spawn items randomly
+        if (settings.itemsEnabled && GetRandomValue(0, 100) < settings.itemFrequency * 100 && GetFrameTime() * GetRandomValue(0, 1000) < 1) {
+            spawnRandomItem();
+        }
+
+        // Update items
+        updateItems();
+    }
+}
+
+// Update everything except characters (for networked prediction)
+void GameState::updateNonCharacters() {
     stateTimer++;
 
     if (currentState == GAME_PLAYING && !isPaused) {

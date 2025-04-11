@@ -1,5 +1,4 @@
 #include "../../include/attacks/AerialAttacks.h"
-#include "../../include/character/CharacterState.h"
 
 using CharacterState::JUMPING;
 using CharacterState::FALLING;

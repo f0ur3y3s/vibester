@@ -1,19 +1,480 @@
 #include "raylib.h"
-#include "Character.h"
+#include "character/Character.h"
 #include "Platform.h"
 #include "Particle.h"
-#include "ParticleSystem.h"
 #include "GameConfig.h"
-#include "Item.h"
 #include "NetworkedGameState.h" // Use NetworkedGameState for both networked and local play
 #include "NetworkUI.h"          // Network UI components
 #include "EnhancedAIController.h" // Enhanced AI controller for PvE
+#include "character/CharacterVisuals.h"
 #include "StateManager.h"
 #include <vector>
 #include <string>
 #include <iostream>
-#include <cmath>
-#include <algorithm>
+#include <ctime>
+#include <random>
+
+// Background class definition - add this to your existing declarations
+class Background {
+private:
+    // Background layers
+    struct CloudLayer {
+        std::vector<Rectangle> clouds;
+        Color color;
+        float speed;
+        float y;
+    };
+
+    std::vector<CloudLayer> cloudLayers;
+    Color skyTopColor;
+    Color skyBottomColor;
+
+    // Distant elements (mountains, hills)
+    struct DistantElement {
+        std::vector<Vector2> points;
+        Color color;
+    };
+
+    std::vector<DistantElement> distantElements;
+
+    // Background theme type
+    enum BackgroundTheme {
+        THEME_SKY,
+        THEME_SUNSET,
+        THEME_NIGHT,
+        THEME_BATTLEFIELD
+    };
+
+    BackgroundTheme currentTheme;
+    float time; // For animations
+
+    // Random generator
+    std::mt19937 rng;
+
+public:
+    Background() : time(0) {
+        // Seed random generator
+        rng.seed(static_cast<unsigned int>(std::time(nullptr)));
+
+        // Initialize with default theme
+        setRandomTheme();
+    }
+
+    void setRandomTheme() {
+        // Pick a random theme
+        std::uniform_int_distribution<int> themeDist(0, 3);
+        currentTheme = static_cast<BackgroundTheme>(themeDist(rng));
+
+        // Clear previous elements
+        cloudLayers.clear();
+        distantElements.clear();
+
+        // Set colors based on theme
+        switch (currentTheme) {
+            case THEME_SKY:
+                skyTopColor = {100, 181, 246, 255};  // Light blue
+                skyBottomColor = {179, 229, 252, 255};  // Very light blue
+                generateSkyTheme();
+                break;
+
+            case THEME_SUNSET:
+                skyTopColor = {33, 150, 243, 255};   // Deep blue
+                skyBottomColor = {255, 152, 0, 255}; // Orange
+                generateSunsetTheme();
+                break;
+
+            case THEME_NIGHT:
+                skyTopColor = {25, 25, 112, 255};    // Midnight blue
+                skyBottomColor = {48, 63, 159, 255}; // Indigo
+                generateNightTheme();
+                break;
+
+            case THEME_BATTLEFIELD:
+                skyTopColor = {33, 33, 33, 255};     // Dark gray
+                skyBottomColor = {97, 97, 97, 255};  // Medium gray
+                generateBattlefieldTheme();
+                break;
+        }
+    }
+
+private:
+    void generateSkyTheme() {
+        // Generate 3 cloud layers
+        std::uniform_real_distribution<float> speedDist(0.2f, 1.0f);
+
+        // White fluffy clouds
+        CloudLayer layer1;
+        layer1.color = {255, 255, 255, 180};
+        layer1.speed = speedDist(rng);
+        layer1.y = SCREEN_HEIGHT * 0.25f;
+        generateCloudsForLayer(layer1, 5, 8);
+        cloudLayers.push_back(layer1);
+
+        // Light gray distant clouds
+        CloudLayer layer2;
+        layer2.color = {240, 240, 240, 150};
+        layer2.speed = speedDist(rng) * 0.6f;
+        layer2.y = SCREEN_HEIGHT * 0.35f;
+        generateCloudsForLayer(layer2, 3, 6);
+        cloudLayers.push_back(layer2);
+
+        // Generate distant hills
+        DistantElement hills;
+        hills.color = {46, 125, 50, 200};  // Green
+        generateHills(hills, SCREEN_HEIGHT * 0.65f, SCREEN_HEIGHT * 0.2f, 3);
+        distantElements.push_back(hills);
+    }
+
+    void generateSunsetTheme() {
+        // Generate orange-tinted clouds
+        std::uniform_real_distribution<float> speedDist(0.1f, 0.8f);
+
+        // Orange-tinted clouds
+        CloudLayer layer1;
+        layer1.color = {255, 183, 77, 180};
+        layer1.speed = speedDist(rng);
+        layer1.y = SCREEN_HEIGHT * 0.2f;
+        generateCloudsForLayer(layer1, 6, 10);
+        cloudLayers.push_back(layer1);
+
+        // Darker orange distant clouds
+        CloudLayer layer2;
+        layer2.color = {251, 140, 0, 150};
+        layer2.speed = speedDist(rng) * 0.5f;
+        layer2.y = SCREEN_HEIGHT * 0.3f;
+        generateCloudsForLayer(layer2, 4, 7);
+        cloudLayers.push_back(layer2);
+
+        // Generate distant mountains
+        DistantElement mountains;
+        mountains.color = {69, 39, 160, 230};  // Deep purple
+        generateMountains(mountains, SCREEN_HEIGHT * 0.7f, SCREEN_HEIGHT * 0.25f, 5);
+        distantElements.push_back(mountains);
+    }
+
+    void generateNightTheme() {
+        // Generate star field
+        DistantElement stars;
+        stars.color = {255, 255, 255, 255};
+        generateStars(stars, 100);
+        distantElements.push_back(stars);
+
+        // Generate thin clouds
+        std::uniform_real_distribution<float> speedDist(0.05f, 0.4f);
+
+        // Dark blue clouds
+        CloudLayer layer1;
+        layer1.color = {40, 53, 147, 100};
+        layer1.speed = speedDist(rng);
+        layer1.y = SCREEN_HEIGHT * 0.2f;
+        generateCloudsForLayer(layer1, 4, 6);
+        cloudLayers.push_back(layer1);
+
+        // Generate distant mountains
+        DistantElement mountains;
+        mountains.color = {26, 35, 126, 255};  // Very dark blue
+        generateMountains(mountains, SCREEN_HEIGHT * 0.75f, SCREEN_HEIGHT * 0.3f, 4);
+        distantElements.push_back(mountains);
+    }
+
+    void generateBattlefieldTheme() {
+        // Generate tech-looking elements
+        std::uniform_real_distribution<float> speedDist(0.1f, 0.3f);
+
+        // Generate mesh/grid lines
+        DistantElement gridlines;
+        gridlines.color = {0, 229, 255, 100};  // Cyan
+        generateGridlines(gridlines, 20);
+        distantElements.push_back(gridlines);
+
+        // Light smoke/clouds
+        CloudLayer layer1;
+        layer1.color = {200, 200, 200, 80};
+        layer1.speed = speedDist(rng);
+        layer1.y = SCREEN_HEIGHT * 0.3f;
+        generateCloudsForLayer(layer1, 5, 7);
+        cloudLayers.push_back(layer1);
+
+        // Generate tech structures
+        DistantElement structures;
+        structures.color = {66, 66, 66, 230};  // Dark gray
+        generateTechStructures(structures);
+        distantElements.push_back(structures);
+    }
+
+    void generateCloudsForLayer(CloudLayer& layer, int minClouds, int maxClouds) {
+        std::uniform_int_distribution<int> cloudCountDist(minClouds, maxClouds);
+        std::uniform_real_distribution<float> widthDist(80.0f, 300.0f);
+        std::uniform_real_distribution<float> heightDist(30.0f, 80.0f);
+        std::uniform_real_distribution<float> xPosDist(0.0f, SCREEN_WIDTH * 2);
+
+        int cloudCount = cloudCountDist(rng);
+
+        for (int i = 0; i < cloudCount; i++) {
+            Rectangle cloud;
+            cloud.width = widthDist(rng);
+            cloud.height = heightDist(rng);
+            cloud.x = xPosDist(rng) - SCREEN_WIDTH * 0.5f;
+            cloud.y = layer.y + heightDist(rng) * 0.3f;
+
+            layer.clouds.push_back(cloud);
+        }
+    }
+
+    void generateHills(DistantElement& hills, float baseY, float height, int segments) {
+        std::uniform_real_distribution<float> heightDist(0.5f, 1.0f);
+
+        float segmentWidth = SCREEN_WIDTH / static_cast<float>(segments);
+
+        // Start point
+        hills.points.push_back({0, baseY});
+
+        // Generate hill points
+        for (int i = 0; i <= segments; i++) {
+            float x = i * segmentWidth;
+            float y = baseY - height * heightDist(rng);
+            hills.points.push_back({x, y});
+        }
+
+        // End point
+        hills.points.push_back({SCREEN_WIDTH, baseY});
+    }
+
+    void generateMountains(DistantElement& mountains, float baseY, float height, int peaks) {
+        std::uniform_real_distribution<float> heightDist(0.6f, 1.0f);
+        std::uniform_real_distribution<float> widthDist(0.8f, 1.2f);
+
+        float segmentWidth = SCREEN_WIDTH / static_cast<float>(peaks);
+
+        // Start point
+        mountains.points.push_back({0, baseY});
+
+        // Generate mountain peaks
+        for (int i = 0; i < peaks; i++) {
+            float centerX = (i + 0.5f) * segmentWidth;
+            float peakHeight = height * heightDist(rng);
+            float leftX = centerX - segmentWidth * 0.25f * widthDist(rng);
+            float rightX = centerX + segmentWidth * 0.25f * widthDist(rng);
+
+            // Left slope
+            mountains.points.push_back({leftX, baseY - peakHeight * 0.3f});
+
+            // Peak
+            mountains.points.push_back({centerX, baseY - peakHeight});
+
+            // Right slope
+            mountains.points.push_back({rightX, baseY - peakHeight * 0.3f});
+        }
+
+        // End point
+        mountains.points.push_back({SCREEN_WIDTH, baseY});
+    }
+
+    void generateStars(DistantElement& stars, int count) {
+        std::uniform_real_distribution<float> xDist(0.0f, SCREEN_WIDTH);
+        std::uniform_real_distribution<float> yDist(0.0f, SCREEN_HEIGHT * 0.6f);
+
+        for (int i = 0; i < count; i++) {
+            stars.points.push_back({xDist(rng), yDist(rng)});
+        }
+    }
+
+    void generateGridlines(DistantElement& gridlines, int count) {
+        std::uniform_real_distribution<float> yDist(0.0f, SCREEN_HEIGHT * 0.8f);
+        std::uniform_real_distribution<float> lengthDist(100.0f, SCREEN_WIDTH * 0.8f);
+        std::uniform_real_distribution<float> xDist(0.0f, SCREEN_WIDTH);
+
+        for (int i = 0; i < count; i++) {
+            float x = xDist(rng);
+            float y = yDist(rng);
+            float length = lengthDist(rng);
+
+            // Horizontal or vertical line
+            if (i % 2 == 0) {
+                // Horizontal
+                gridlines.points.push_back({x, y});
+                gridlines.points.push_back({x + length, y});
+            } else {
+                // Vertical
+                gridlines.points.push_back({x, y});
+                gridlines.points.push_back({x, y + length});
+            }
+        }
+    }
+
+    void generateTechStructures(DistantElement& structures) {
+        std::uniform_real_distribution<float> widthDist(40.0f, 120.0f);
+        std::uniform_real_distribution<float> heightDist(50.0f, 200.0f);
+        std::uniform_int_distribution<int> countDist(5, 15);
+        std::uniform_real_distribution<float> xDist(0.0f, SCREEN_WIDTH);
+
+        int count = countDist(rng);
+        float baseY = SCREEN_HEIGHT * 0.75f;
+
+        for (int i = 0; i < count; i++) {
+            float x = xDist(rng);
+            float width = widthDist(rng);
+            float height = heightDist(rng);
+
+            // Building structure
+            structures.points.push_back({x, baseY});
+            structures.points.push_back({x, baseY - height});
+            structures.points.push_back({x + width, baseY - height});
+            structures.points.push_back({x + width, baseY});
+
+            // Extra point as separator between buildings
+            structures.points.push_back({-1, -1});
+        }
+    }
+
+public:
+    void update(float deltaTime) {
+        time += deltaTime;
+
+        // Update cloud positions
+        for (auto& layer : cloudLayers) {
+            for (auto& cloud : layer.clouds) {
+                cloud.x += layer.speed;
+
+                // Wrap around when outside screen
+                if (cloud.x > SCREEN_WIDTH + cloud.width) {
+                    cloud.x = -cloud.width;
+                }
+            }
+        }
+    }
+
+    void draw() {
+        // Draw sky gradient
+        DrawRectangleGradientV(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, skyTopColor, skyBottomColor);
+
+        // Draw distant elements
+        for (const auto& element : distantElements) {
+            // Stars
+            if (currentTheme == THEME_NIGHT && element.color.r == 255 && element.color.g == 255 && element.color.b == 255) {
+                for (const auto& point : element.points) {
+                    // Twinkle effect
+                    float brightness = 0.7f + 0.3f * sin(time * 2.0f + point.x * 0.1f + point.y * 0.1f);
+                    Color starColor = {
+                        element.color.r,
+                        element.color.g,
+                        element.color.b,
+                        static_cast<unsigned char>(255 * brightness)
+                    };
+                    DrawCircle(point.x, point.y, 1.0f, starColor);
+                }
+            }
+            // Grid lines
+            else if (currentTheme == THEME_BATTLEFIELD && element.color.r == 0 && element.color.g == 229) {
+                for (size_t i = 0; i < element.points.size(); i += 2) {
+                    if (i + 1 < element.points.size()) {
+                        DrawLineEx(
+                            element.points[i],
+                            element.points[i + 1],
+                            1.0f,
+                            element.color
+                        );
+                    }
+                }
+            }
+            // Tech structures
+            else if (currentTheme == THEME_BATTLEFIELD && element.color.r == 66) {
+                Vector2 buildingPoints[4];
+                int pointIndex = 0;
+
+                for (size_t i = 0; i < element.points.size(); i++) {
+                    if (element.points[i].x < 0) {
+                        // Separator, draw previous building
+                        if (pointIndex == 4) {
+                            DrawTriangle(
+                                buildingPoints[0],
+                                buildingPoints[1],
+                                buildingPoints[2],
+                                element.color
+                            );
+                            DrawTriangle(
+                                buildingPoints[0],
+                                buildingPoints[2],
+                                buildingPoints[3],
+                                element.color
+                            );
+                        }
+                        pointIndex = 0;
+                    } else {
+                        if (pointIndex < 4) {
+                            buildingPoints[pointIndex++] = element.points[i];
+                        }
+                    }
+                }
+            }
+            // Hills and mountains
+            else {
+                Vector2* points = new Vector2[element.points.size() + 2];
+                int pointCount = 0;
+
+                for (const auto& point : element.points) {
+                    points[pointCount++] = point;
+                }
+
+                // Add bottom corners to close the shape
+                points[pointCount++] = {SCREEN_WIDTH, SCREEN_HEIGHT};
+                points[pointCount++] = {0, SCREEN_HEIGHT};
+
+                DrawTriangleFan(points, pointCount, element.color);
+
+                delete[] points;
+            }
+        }
+
+        // Draw clouds
+        for (const auto& layer : cloudLayers) {
+            for (const auto& cloud : layer.clouds) {
+                // Draw multiple circles for fluffy cloud effect
+                float baseRadius = cloud.height * 0.5f;
+
+                // Center cloud
+                DrawCircle(
+                    cloud.x + cloud.width * 0.5f,
+                    cloud.y + cloud.height * 0.5f,
+                    baseRadius,
+                    layer.color
+                );
+
+                // Left puff
+                DrawCircle(
+                    cloud.x + cloud.width * 0.25f,
+                    cloud.y + cloud.height * 0.6f,
+                    baseRadius * 0.8f,
+                    layer.color
+                );
+
+                // Right puff
+                DrawCircle(
+                    cloud.x + cloud.width * 0.75f,
+                    cloud.y + cloud.height * 0.6f,
+                    baseRadius * 0.8f,
+                    layer.color
+                );
+
+                // Top puff
+                DrawCircle(
+                    cloud.x + cloud.width * 0.5f,
+                    cloud.y + cloud.height * 0.3f,
+                    baseRadius * 0.7f,
+                    layer.color
+                );
+            }
+        }
+    }
+};
+
+// Add this to your global game variables
+Background background;
+
+// Add methods to change the theme
+void CycleBackgroundTheme() {
+    background.setRandomTheme();
+}
 
 // Main game functions
 void InitGame();
@@ -33,9 +494,9 @@ using CharacterState::HITSTUN;
 using CharacterState::DYING;
 
 // Global game variables
-NetworkedGameState gameState;    // Use NetworkedGameState for both modes
-NetworkUI* networkUI = nullptr;  // Network UI
-bool showNetworkMenu = false;    // Flag to show/hide network menu
+NetworkedGameState gameState; // Use NetworkedGameState for both modes
+NetworkUI* networkUI = nullptr; // Network UI
+bool showNetworkMenu = false; // Flag to show/hide network menu
 std::vector<Character*> players;
 std::vector<Platform> platforms;
 std::vector<Vector2> spawnPoints;
@@ -81,6 +542,8 @@ void InitGame()
 {
     // Load font
     gameFont = GetFontDefault();
+    background = Background();
+    CharacterVisuals::InitShaders();
 
     // Create platforms with appropriate types
     // Main/bottom platform (SOLID - has full collision)
@@ -126,15 +589,18 @@ void InitGame()
         50, 80,
         5.0f,
         RED,
-        "Player 1"
+        "Player 1",
+        STYLE_BRAWLER
     );
 
+    // Create enemy/opponent with different style
     Character* player2 = new Character(
         spawnPoints[1].x, spawnPoints[1].y,
         50, 80,
         5.0f,
         BLUE,
-        "Player 2"
+        "Player 2",
+        STYLE_SPEEDY // Fox-like character
     );
 
     players.push_back(player1);
@@ -171,27 +637,32 @@ void InitGame()
 void UpdateGame()
 {
     // Check for network menu toggle
-    if (IsKeyPressed(KEY_N)) {
+    if (IsKeyPressed(KEY_N))
+    {
         // Only toggle if not in active gameplay
         if (gameState.currentState != GameState::GAME_PLAYING &&
-            gameState.currentState != GameState::GAME_START) {
+            gameState.currentState != GameState::GAME_START)
+        {
             showNetworkMenu = !showNetworkMenu;
         }
     }
 
     // Always update networked game state first to check for messages,
     // even if we're in network UI mode
-    if (gameState.isNetworked()) {
+    if (gameState.isNetworked())
+    {
         // Process network messages
         NetworkManager& netManager = NetworkManager::getInstance();
         netManager.update();
 
         // Check explicitly for game start message when in client mode
-        if (gameState.getNetworkMode() == NetworkedGameState::CLIENT) {
+        if (gameState.getNetworkMode() == NetworkedGameState::CLIENT)
+        {
             bool gameStarted = netManager.hasGameStartMessage();
             if (gameStarted &&
                 gameState.currentState != GameState::GAME_PLAYING &&
-                gameState.currentState != GameState::GAME_START) {
+                gameState.currentState != GameState::GAME_START)
+            {
                 std::cout << "Game.cpp: Client detected game start message!" << std::endl;
                 showNetworkMenu = false;
                 gameState.changeState(GameState::GAME_START);
@@ -200,14 +671,18 @@ void UpdateGame()
     }
 
     // Update network UI if visible
-    if (showNetworkMenu) {
+    if (showNetworkMenu)
+    {
         networkUI->update();
 
         // IMPORTANT: If the game state is now GAME_START or GAME_PLAYING, we need to hide the menu
         if (gameState.currentState == GameState::GAME_PLAYING ||
-            gameState.currentState == GameState::GAME_START) {
+            gameState.currentState == GameState::GAME_START)
+        {
             showNetworkMenu = false;
-        } else {
+        }
+        else
+        {
             return; // Skip normal game update when in network menu
         }
     }
@@ -219,47 +694,95 @@ void UpdateGame()
     switch (gameState.currentState)
     {
     case GameState::TITLE_SCREEN:
-        // Title screen logic (unchanged)
+        // Character style selection
+            if (IsKeyPressed(KEY_ONE) && players.size() >= 2) {
+                // Cycle player 1 style
+                int currentStyle = static_cast<int>(players[0]->characterStyle);
+                currentStyle = (currentStyle + 1) % 5; // 5 styles total
+
+                players[0]->characterStyle = static_cast<CharacterStyle>(currentStyle);
+
+                // Recreate visuals with new style
+                delete players[0]->visuals;
+                players[0]->visuals = new CharacterVisuals(players[0], players[0]->characterStyle, players[0]->color, WHITE);
+            }
+
+        if (IsKeyPressed(KEY_TWO) && players.size() >= 2) {
+            // Cycle player 2 style
+            int currentStyle = static_cast<int>(players[1]->characterStyle);
+            currentStyle = (currentStyle + 1) % 5; // 5 styles total
+
+            players[1]->characterStyle = static_cast<CharacterStyle>(currentStyle);
+
+            // Recreate visuals with new style
+            delete players[1]->visuals;
+            players[1]->visuals = new CharacterVisuals(players[1], players[1]->characterStyle, players[1]->color, WHITE);
+        }
+
+        // Difficulty selection (keep your existing code)
+        if (IsKeyPressed(KEY_ONE)) difficultyLevel = 0.2f;
+        if (IsKeyPressed(KEY_TWO)) difficultyLevel = 0.5f;
+        if (IsKeyPressed(KEY_THREE)) difficultyLevel = 0.8f;
+        if (IsKeyPressed(KEY_FOUR)) difficultyLevel = 1.0f;
+
+        // Background cycle
+        if (IsKeyPressed(KEY_B)) {
+            CycleBackgroundTheme();
+        }
+
+        // Game start
+        if (IsKeyPressed(KEY_ENTER)) {
+            gameState.changeState(GameState::GAME_START);
+        }
         break;
 
     case GameState::GAME_START:
         // Hide network menu if it's open when the game is starting
-        if (showNetworkMenu) {
+        if (showNetworkMenu)
+        {
             std::cout << "Game.cpp: Hiding network menu for game start" << std::endl;
             showNetworkMenu = false;
         }
 
-        // Game start countdown
+    // Game start countdown
         gameState.stateTimer++;
         std::cout << "Game.cpp: Game start countdown: " << gameState.stateTimer << "/" << GAME_START_TIMER << std::endl;
-        if (gameState.stateTimer >= GAME_START_TIMER) {
+        if (gameState.stateTimer >= GAME_START_TIMER)
+        {
             std::cout << "Game.cpp: Countdown finished, changing to GAME_PLAYING" << std::endl;
             gameState.changeState(GameState::GAME_PLAYING);
         }
 
-        // Update player positions during countdown
-        if (isNetworked) {
+    // Update player positions during countdown
+        if (isNetworked)
+        {
             gameState.update();
         }
         break;
 
     case GameState::GAME_PLAYING:
         // Check for pause
-        if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE)) {
+        if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE))
+        {
             gameState.pauseGame();
             break;
         }
 
-        // Update debug mode
-        if (IsKeyPressed(KEY_F1)) {
+        background.update(GetFrameTime());
+
+    // Update debug mode
+        if (IsKeyPressed(KEY_F1))
+        {
             debugMode = !debugMode;
         }
 
-        // For networked mode, use the NetworkedGameState update which handles sync
-        if (isNetworked) {
+    // For networked mode, use the NetworkedGameState update which handles sync
+        if (isNetworked)
+        {
             gameState.update();
         }
-        else {
+        else
+        {
             // Normal update for local play
 
             // Update players
@@ -272,7 +795,8 @@ void UpdateGame()
             for (auto& attacker : players)
             {
                 // Skip players who are dying or exploding
-                if (attacker->stateManager.isDying || attacker->stateManager.isExploding) {
+                if (attacker->stateManager.isDying || attacker->stateManager.isExploding)
+                {
                     continue;
                 }
 
@@ -515,7 +1039,12 @@ void UpdateGame()
             gameState.resetMatch();
         }
 
-        // Network disconnect option in pause menu
+        if (IsKeyPressed(KEY_B))
+        {
+            CycleBackgroundTheme();
+        }
+
+    // Network disconnect option in pause menu
         if (IsKeyPressed(KEY_N) && isNetworked)
         {
             gameState.disconnectFromGame();
@@ -538,9 +1067,12 @@ void UpdateGame()
         if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE))
         {
             // If in network mode, return to lobby
-            if (isNetworked) {
+            if (isNetworked)
+            {
                 showNetworkMenu = true;
-            } else {
+            }
+            else
+            {
                 gameState.resetMatch();
                 gameState.changeState(GameState::TITLE_SCREEN);
             }
@@ -555,7 +1087,7 @@ void UpdateGame()
 void DrawGame()
 {
     // Draw background
-    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, {135, 206, 235, 255}); // Sky blue
+    background.draw();
 
     // Draw platforms
     for (auto& platform : platforms)
@@ -607,19 +1139,24 @@ void DrawGame()
     {
         // Special case: Force client into game mode if host is in game mode
         // This is a fallback in case the MSG_GAME_START message was lost
-        if (gameState.isNetworked() && 
-            !gameState.isNetworkHost() && 
-            gameState.currentState != GameState::GAME_START && 
+        if (gameState.isNetworked() &&
+            !gameState.isNetworkHost() &&
+            gameState.currentState != GameState::GAME_START &&
             gameState.currentState != GameState::GAME_PLAYING &&
             showNetworkMenu)
         {
             // Check if the host is in game state by looking at the game state packet
-            for (const auto& peer : NetworkManager::getInstance().peers) {
-                if (peer.playerID == 0) {  // Host is always ID 0
+            for (const auto& peer : NetworkManager::getInstance().peers)
+            {
+                if (peer.playerID == 0)
+                {
+                    // Host is always ID 0
                     // If host is in game mode, the ping will be active
                     bool hostInGameState = (peer.lastPingTime > 0);
-                    if (hostInGameState) {
-                        std::cout << "EMERGENCY OVERRIDE: Detected host in game state, forcing client to start game" << std::endl;
+                    if (hostInGameState)
+                    {
+                        std::cout << "EMERGENCY OVERRIDE: Detected host in game state, forcing client to start game" <<
+                            std::endl;
                         showNetworkMenu = false;
                         gameState.changeState(GameState::GAME_START);
                     }
@@ -627,7 +1164,7 @@ void DrawGame()
                 }
             }
         }
-        
+
         Color statusColor = gameState.isNetworkHost() ? GREEN : BLUE;
         const char* statusText = gameState.isNetworkHost() ? "HOST" : "CLIENT";
         DrawText(statusText, SCREEN_WIDTH - 80, 10, 20, statusColor);
@@ -668,6 +1205,16 @@ void DrawGame()
 
             DrawText("Can you defeat the AI or challenge your friends online?",
                      SCREEN_WIDTH / 2 - 270, SCREEN_HEIGHT - 80, 20, WHITE);
+
+            // Character style selection
+            DrawText("Character Styles:", SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT - 200, 20, WHITE);
+
+            // Display current styles
+            const char* styleNames[] = {"Brawler", "Speedy", "Heavy", "Sword", "Custom"};
+
+            // Add the background theme info
+            DrawText("Press B to change background theme", SCREEN_WIDTH / 2 - 200, SCREEN_HEIGHT - 80, 20, WHITE);
+
         }
         break;
 
@@ -687,7 +1234,8 @@ void DrawGame()
             DrawText("Press R to Restart", SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 2 + 40, 30, WHITE);
 
             // Show network disconnect option if in network mode
-            if (gameState.isNetworked()) {
+            if (gameState.isNetworked())
+            {
                 DrawText("Press N to Disconnect from Network", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT / 2 + 80, 30, RED);
             }
         }
@@ -715,9 +1263,12 @@ void DrawGame()
             else if (winnerId == 1)
             {
                 // Different message based on mode (AI or human opponent)
-                if (gameState.isNetworked()) {
+                if (gameState.isNetworked())
+                {
                     DrawText("OPPONENT WINS!", SCREEN_WIDTH / 2 - 180, SCREEN_HEIGHT / 3, 50, RED);
-                } else {
+                }
+                else
+                {
                     DrawText("AI WINS!", SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 3, 50, RED);
                 }
             }
@@ -738,9 +1289,12 @@ void DrawGame()
                 Color playerColor = players[i]->color;
                 std::string displayName;
 
-                if (gameState.isNetworked()) {
+                if (gameState.isNetworked())
+                {
                     displayName = (i == 0) ? "You" : "Opponent";
-                } else {
+                }
+                else
+                {
                     displayName = (i == 0) ? "You" : "AI";
                 }
 
@@ -749,22 +1303,29 @@ void DrawGame()
                 DrawText(TextFormat("Damage: %.0f%%", players[i]->damagePercent), 600, 200 + i * 80, 30, WHITE);
             }
 
-            if (gameState.isNetworked()) {
+            if (gameState.isNetworked())
+            {
                 DrawText("Press ENTER to return to lobby", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT - 100, 24, WHITE);
-            } else {
-                DrawText("Press ENTER to return to title screen", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT - 100, 24, WHITE);
+            }
+            else
+            {
+                DrawText("Press ENTER to return to title screen", SCREEN_WIDTH / 2 - 220, SCREEN_HEIGHT - 100, 24,
+                         WHITE);
             }
         }
         break;
     }
 
     // Draw network UI if visible AND we're not in game start/play state
-    if (showNetworkMenu && networkUI && 
-        (gameState.currentState != GameState::GAME_START && 
-         gameState.currentState != GameState::GAME_PLAYING)) {
+    if (showNetworkMenu && networkUI &&
+        (gameState.currentState != GameState::GAME_START &&
+            gameState.currentState != GameState::GAME_PLAYING))
+    {
         networkUI->draw();
-    } else if (gameState.currentState == GameState::GAME_START || 
-               gameState.currentState == GameState::GAME_PLAYING) {
+    }
+    else if (gameState.currentState == GameState::GAME_START ||
+        gameState.currentState == GameState::GAME_PLAYING)
+    {
         // Force hide UI during game states
         showNetworkMenu = false;
     }
@@ -850,12 +1411,13 @@ void DrawGame()
         );
 
         // If networked, show additional debug info
-        if (gameState.isNetworked()) {
+        if (gameState.isNetworked())
+        {
             DrawText(
                 TextFormat("Ping: %d ms | Sync: %.1f%% | Frame Adv: %d",
-                         gameState.getAveragePing(),
-                         gameState.getSyncPercentage(),
-                         gameState.getFrameAdvantage()),
+                           gameState.getAveragePing(),
+                           gameState.getSyncPercentage(),
+                           gameState.getFrameAdvantage()),
                 10, SCREEN_HEIGHT - 20,
                 16,
                 WHITE
@@ -883,7 +1445,8 @@ void CleanupGame()
     NetworkManager::getInstance().shutdown();
 
     // Delete network UI
-    if (networkUI) {
+    if (networkUI)
+    {
         delete networkUI;
         networkUI = nullptr;
     }

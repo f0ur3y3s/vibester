@@ -1,6 +1,6 @@
 #include "../../include/character/CharacterStateManager.h"
 
-void CharacterStateManager::changeState(CharacterState::State newState)
+void CharacterStateManager::changeState(CharacterState newState)
 {
     // Don't change state if in hitstun
     if (state == CharacterState::HITSTUN && newState != CharacterState::DYING && hitstunFrames > 0) {
@@ -46,7 +46,7 @@ void CharacterStateManager::changeState(CharacterState::State newState)
     state = newState;
 }
 
-bool CharacterStateManager::canChangeState(CharacterState::State newState) const
+bool CharacterStateManager::canChangeState(CharacterState newState) const
 {
     // Check for restrictions on state changes
     if (state == CharacterState::HITSTUN && hitstunFrames > 0 && newState != CharacterState::DYING) {

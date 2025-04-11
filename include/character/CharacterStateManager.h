@@ -2,12 +2,12 @@
 #define CHARACTER_STATE_MANAGER_H
 
 #include "../CharacterConfig.h"
-#include "CharacterState.h"
-#include "Cooldown.h"
+#include "../StateManager.h"
+
 #include <algorithm>
 
-using CharacterState::State;
-using AttackType::Type;
+using ::CharacterState;
+using ::AttackType ;
 
 class CharacterStateManager {
 public:
@@ -44,15 +44,15 @@ public:
           specialDownCD(120),
           dodgeCD(GameConfig::DODGE_COOLDOWN) {}
 
-    void changeState(CharacterState::State newState);
-    bool canChangeState(CharacterState::State newState) const;
+    void changeState(CharacterState newState);
+    bool canChangeState(CharacterState newState) const;
     bool isAirborne() const;
     bool isActionable() const;
     void updateTimers();
     void updateCooldowns();
 
     // Current state and flags
-    CharacterState::State state;
+    CharacterState state;
     bool isFacingRight;
     bool isJumping;
     bool hasDoubleJump;
@@ -81,7 +81,7 @@ public:
     int explosionDuration;
     
     // Attack state
-    AttackType::Type currentAttack;
+    AttackType currentAttack;
     int attackDuration;
     int attackFrame;
     

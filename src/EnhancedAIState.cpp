@@ -1,6 +1,6 @@
 // EnhancedAIState.cpp
 #include "EnhancedAIState.h"
-#include "Character.h"
+#include "character/Character.h"
 #include <algorithm>
 #include <cmath>
 

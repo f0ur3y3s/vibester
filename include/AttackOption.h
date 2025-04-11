@@ -2,7 +2,7 @@
 #pragma once
 
 #include "IAttackOption.h"
-#include "Character.h"
+#include "character/Character.h"
 #include "StateManager.h"
 #include <cmath>
 #include <algorithm>

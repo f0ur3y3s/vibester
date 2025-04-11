@@ -8,23 +8,26 @@
 #include <deque>
 
 // Extended GameState for network play
-class NetworkedGameState : public GameState {
+class NetworkedGameState : public GameState
+{
 public:
     // Constructors
     NetworkedGameState();
 
     // Network-specific state
-    enum NetworkGameMode {
-        LOCAL_ONLY,      // Regular local play
-        HOST,           // Server/host
-        CLIENT         // Client
+    enum NetworkGameMode
+    {
+        LOCAL_ONLY, // Regular local play
+        SERVER, // Server with authoritative state
+        CLIENT // Client that follows server's state
     };
 
     // Network mode functions
     void setNetworkMode(NetworkGameMode mode);
     NetworkGameMode getNetworkMode() const { return networkMode; }
     bool isNetworked() const { return networkMode != LOCAL_ONLY; }
-    bool isNetworkHost() const { return networkMode == HOST; }
+    bool isNetworkHost() const { return networkMode == SERVER; }
+    bool isServer() const { return networkMode == SERVER; }
 
     // Connection management
     bool hostGame(int port = 7777);
@@ -41,7 +44,7 @@ public:
 
     // Override base class draw with network capability
     virtual void draw();
-    
+
     // Override the state change function to handle network state changes
     virtual void changeState(State newState) override;
 
@@ -53,6 +56,14 @@ public:
 
     // Synchronize game state
     void synchronizeGameState();
+
+    // Server-side methods
+    void updateAsServer();
+    void sendServerStateUpdate();
+
+    // Client-side methods
+    void updateAsClient();
+    void applyServerState(const GameStatePacket& state);
 
     // Network latency management
     void setInputDelay(int frames) { inputDelayFrames = frames; }
@@ -82,9 +93,28 @@ private:
 
     // Network synchronization
     uint32_t networkFrame;
+    float serverTickAccumulator;
+    int serverTickRate;
+    bool clientPredictionEnabled;
     std::deque<GameStatePacket> stateBuffer;
     std::deque<NetworkInput> inputBuffer;
     std::queue<NetworkInput> remoteInputQueue;
+
+    // Client state for reconciliation
+    uint32_t lastAuthoritativeFrame;
+    float interpolationAlpha;
+
+    // Server client tracking
+    struct ClientState
+    {
+        uint32_t clientId;
+        uint32_t lastInputFrame;
+        std::deque<NetworkInput> inputHistory;
+        bool connected;
+        int ping;
+    };
+
+    std::vector<ClientState> clients;
 
     // Input handling
     NetworkInput currentLocalInput;

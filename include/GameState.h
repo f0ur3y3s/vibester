@@ -2,10 +2,9 @@
 #define GAMESTATE_H
 
 #include "raylib.h"
-#include "Character.h"
+#include "character/Character.h"
 #include "Platform.h"
 #include "Particle.h"
-#include "GameConfig.h"
 #include <vector>
 #include <string>
 
@@ -14,9 +13,11 @@ class Item;
 class Stage;
 
 // Game state manager for Smash Bros style game
-class GameState {
+class GameState
+{
 public:
-    enum State {
+    enum State
+    {
         TITLE_SCREEN,
         CHARACTER_SELECT,
         STAGE_SELECT,
@@ -28,19 +29,21 @@ public:
         RESULTS_SCREEN
     };
 
-    enum GameMode {
-        PVE_MODE,  // Player vs AI (original mode)
-        PVP_MODE   // Player vs Player (new mode)
+    enum GameMode
+    {
+        PVE_MODE, // Player vs AI (original mode)
+        PVP_MODE // Player vs Player (new mode)
     };
 
     // Match settings
-    struct MatchSettings {
+    struct MatchSettings
+    {
         int stockCount;
-        int timeLimit;        // In seconds, 0 for infinite
+        int timeLimit; // In seconds, 0 for infinite
         bool itemsEnabled;
         float itemFrequency;
         bool stageHazards;
-        bool finalSmash;      // Whether final smash meter/ball is enabled
+        bool finalSmash; // Whether final smash meter/ball is enabled
     };
 
     // Current state
@@ -50,8 +53,8 @@ public:
 
     // Match configuration
     MatchSettings settings;
-    int currentTime;          // Time remaining in seconds
-    bool isStockMatch;        // Stock match vs. Time match
+    int currentTime; // Time remaining in seconds
+    bool isStockMatch; // Stock match vs. Time match
     bool isSuddenDeath;
 
     // Players and stage
@@ -66,14 +69,15 @@ public:
     Rectangle blastZones;
 
     // UI elements
-    Texture2D stockIcons[4];   // Stock icons for each player
+    Texture2D stockIcons[4]; // Stock icons for each player
 
     // Results
-    struct PlayerResult {
+    struct PlayerResult
+    {
         std::string name;
         int stocksRemaining;
-        int falls;            // How many times they fell off
-        int KOs;              // How many knockouts they scored
+        int falls; // How many times they fell off
+        int KOs; // How many knockouts they scored
         int damageDealt;
         int damageTaken;
         int selfDestructs;
@@ -89,6 +93,7 @@ public:
     // Core methods
     void initialize();
     void update();
+    void updateNonCharacters(); // Update everything except characters (for network prediction)
     void draw();
 
     // State transition methods

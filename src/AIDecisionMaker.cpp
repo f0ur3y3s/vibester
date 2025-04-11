@@ -1,7 +1,7 @@
 // AIDecisionMaker.cpp
 #include "AIDecisionMaker.h"
 #include "EnhancedAIState.h"
-#include "Character.h"
+#include "character/Character.h"
 #include "Platform.h"
 #include "Constants.h"
 #include "CharacterConfig.h"

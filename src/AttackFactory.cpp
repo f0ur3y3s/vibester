@@ -1,5 +1,5 @@
 #include "AttackFactory.h"
-#include "Character.h"
+#include "character/Character.h"
 #include <cmath>
 
 // Helper method to create hitbox rectangles relative to character size

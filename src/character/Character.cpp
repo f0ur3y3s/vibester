@@ -5,7 +5,7 @@
 #include "../../include/attacks/AerialAttacks.h"
 #include "../../include/GameConfig.h"
 
-using CharacterState::State;
+using ::CharacterState;
 using CharacterState::IDLE;
 using CharacterState::RUNNING;
 using CharacterState::JUMPING;
@@ -16,7 +16,6 @@ using CharacterState::DODGING;
 using CharacterState::HITSTUN;
 using CharacterState::DYING;
 
-using AttackType::Type;
 using AttackType::NONE;
 using AttackType::JAB;
 using AttackType::FORWARD_TILT;
@@ -43,16 +42,18 @@ using AttackType::UP_THROW;
 using AttackType::DOWN_THROW;
 
 // Main constructor
-Character::Character(float x, float y, float w, float h, float spd, Color col, std::string n) {
+Character::Character(float x, float y, float w, float h, float spd, Color col, std::string n, CharacterStyle style) {
     // Initialize physics system
     physics = CharacterPhysics(x, y);
-    
+
     // Basic properties
     width = w;
     height = h;
     speed = spd;
     color = col;
     name = n;
+    previousState = CharacterState::IDLE;
+    lastTrailTime = 0.0f;
 
     // Smash-style properties
     damagePercent = 0.0f;
@@ -71,7 +72,33 @@ Character::Character(float x, float y, float w, float h, float spd, Color col, s
     deathScale = 1.0f;
     deathVelocity = {0, 0};
     deathPosition = {0, 0};
+
+    // Initialize the visual system
+    Color secondaryColor = WHITE; // Default secondary color
+
+    // Set appropriate secondary color based on primary color
+    if (col.r == 255 && col.g == 0 && col.b == 0) {
+        // Red -> Use blue secondary
+        secondaryColor = BLUE;
+    } else if (col.r == 0 && col.g == 0 && col.b == 255) {
+        // Blue -> Use red secondary
+        secondaryColor = RED;
+    } else if (col.r == 0 && col.g == 255 && col.b == 0) {
+        // Green -> Use yellow secondary
+        secondaryColor = YELLOW;
+    } else if (col.r == 255 && col.g == 255 && col.b == 0) {
+        // Yellow -> Use green secondary
+        secondaryColor = GREEN;
+    }
+
+    visuals = new CharacterVisuals(this, style, col, secondaryColor);
 }
+
+// Add destructor implementation:
+Character::~Character() {
+    delete visuals;
+}
+
 
 // Basic geometry methods
 Rectangle Character::getRect() {
@@ -83,11 +110,11 @@ Rectangle Character::getHurtbox() {
     float hurtboxScale = 0.85f;
     float adjustedWidth = width * hurtboxScale;
     float adjustedHeight = height * hurtboxScale;
-    return {physics.position.x - adjustedWidth/2, physics.position.y - adjustedHeight/2, 
+    return {physics.position.x - adjustedWidth/2, physics.position.y - adjustedHeight/2,
             adjustedWidth, adjustedHeight};
 }
 
-void Character::changeState(CharacterState::State newState) {
+void Character::changeState(CharacterState newState) {
     stateManager.changeState(newState);
 }
 
@@ -112,16 +139,16 @@ bool Character::isOutOfBounds() {
 }
 
 // Accessor methods
-float Character::getDamagePercent() const { 
-    return damagePercent; 
+float Character::getDamagePercent() const {
+    return damagePercent;
 }
 
-int Character::getStocks() const { 
-    return stocks; 
+int Character::getStocks() const {
+    return stocks;
 }
 
-std::string Character::getName() const { 
-    return name; 
+std::string Character::getName() const {
+    return name;
 }
 
 // Main update method with physics and collision handling
@@ -133,7 +160,7 @@ void Character::update(std::vector<Platform>& platforms) {
     if ((stateManager.isDying || stateManager.isExploding) && !attacks.empty()) {
         resetAttackState();
     }
-    
+
     // Skip normal updates if exploding
     if (stateManager.isExploding) {
         updateExplosionAnimation();
@@ -517,79 +544,58 @@ void Character::update(std::vector<Platform>& platforms) {
             i--;
         }
     }
+
+    // After all other updates, update visual system
+    bool isFacingLeft = !stateManager.isFacingRight;
+
+    // If attacking, update animation based on attack type
+    if (stateManager.isAttacking) {
+        visuals->updateAnimationFromAttack(stateManager.currentAttack);
+    }
+    // Otherwise update based on state
+    else {
+        visuals->updateAnimationFromState(stateManager.state, stateManager.isAttacking, stateManager.isGrabbing);
+    }
+
+    // Update visuals with facing direction
+    visuals->update(GetFrameTime(), isFacingLeft);
+
+    // Add trail effects for fast movement
+    if (std::abs(physics.velocity.x) > 25.0f && GetTime() - lastTrailTime > 0.1f) {
+        visuals->addTrailPoint({physics.position.x, physics.position.y - height/2});
+        lastTrailTime = GetTime();
+    }
+
+    // Add landing effects
+    if (stateManager.state == CharacterState::IDLE &&
+        previousState == CharacterState::FALLING) {
+        visuals->addDustEffect({physics.position.x, physics.position.y});
+        }
+
+    // Store previous state for next frame
+    previousState = stateManager.state;
+
 }
 
 void Character::draw() {
     // Skip normal drawing if exploding
     if (stateManager.isExploding) {
-        drawExplosionAnimation();
+        visuals->drawExplosionEffect(physics.position, stateManager.explosionFrame, stateManager.explosionDuration);
+        drawExplosionAnimation(); // Still use original explosion particles
         return;
     }
 
     // Skip normal drawing if dying
     if (stateManager.isDying) {
-        drawDeathAnimation();
+        visuals->drawDeathAnimation(deathPosition, width, height, deathRotation, deathScale, damagePercent);
         return;
     }
 
-    // Visual effects for states
-    Color drawColor = color;
+    // Use enhanced visual system for normal drawing
+    bool isFacingLeft = !stateManager.isFacingRight;
+    visuals->draw(physics.position, width, height, damagePercent);
 
-    // Flashing for invincibility
-    if (stateManager.isInvincible) {
-        if ((framesCounter / 3) % 2 == 0) {
-            drawColor.a = 128; // Half opacity
-        }
-    }
-
-    // Damage gradient
-    if (damagePercent > 0) {
-        // Gradually shift to red as damage increases
-        float damageRatio = std::min(damagePercent / 150.0f, 1.0f);
-        drawColor.r = std::min(255, drawColor.r + static_cast<int>(damageRatio * 100));
-        drawColor.g = std::max(0, drawColor.g - static_cast<int>(damageRatio * 80));
-        drawColor.b = std::max(0, drawColor.b - static_cast<int>(damageRatio * 80));
-    }
-
-    // Basic character drawing
-    DrawRectangle(
-        static_cast<int>(physics.position.x - width/2),
-        static_cast<int>(physics.position.y - height/2),
-        static_cast<int>(width),
-        static_cast<int>(height),
-        drawColor
-    );
-
-    // Direction indicator (eyes/face)
-    float eyeOffset = stateManager.isFacingRight ? width * 0.2f : -width * 0.2f;
-    DrawCircle(
-        static_cast<int>(physics.position.x + eyeOffset),
-        static_cast<int>(physics.position.y - height * 0.1f),
-        width * 0.15f,
-        BLACK
-    );
-
-    // Shield visualization
-    if (stateManager.isShielding) {
-        float shieldRatio = stateManager.shieldHealth / GameConfig::MAX_SHIELD_HEALTH;
-        float shieldSize = (width + height) * 0.4f * shieldRatio;
-        Color shieldColor = {100, 200, 255, 128}; // Semi-transparent blue
-
-        // Shield color shifts to red as it weakens
-        shieldColor.g = static_cast<unsigned char>(200 * shieldRatio);
-        shieldColor.b = static_cast<unsigned char>(255 * shieldRatio);
-
-        DrawCircleV(physics.position, shieldSize, shieldColor);
-    }
-
-    // Draw hitboxes if attacking and not dying/exploding (for debug)
-    if (stateManager.isAttacking && !stateManager.isDying && !stateManager.isExploding) {
-        for (auto& attack : attacks) {
-            attack.draw(true);
-        }
-    }
-
-    // Draw hit effects
+    // Draw hit effects (keep existing hit effects)
     for (auto& effect : hitEffects) {
         effect.draw();
     }
@@ -607,6 +613,15 @@ void Character::draw() {
 
     // Animation counter
     framesCounter++;
+
+    // Debug: Draw attack hitboxes if in debug mode
+#ifdef DEBUG_MODE
+    if (stateManager.isAttacking && !stateManager.isDying && !stateManager.isExploding) {
+        for (auto& attack : attacks) {
+            attack.draw(true);
+        }
+    }
+#endif
 }
 
 // Movement method delegations
@@ -733,12 +748,12 @@ void Character::neutralSpecial() {
         float hitboxY = physics.position.y - hitboxHeight / 2;
 
         Rectangle hitboxRect = {hitboxX, hitboxY, hitboxWidth, hitboxHeight};
-        
+
         // Create a projectile with velocity and set to destroy on hit
         Vector2 projectileVelocity = {stateManager.isFacingRight ? 12.0f : -12.0f, 0.0f};
-        
+
         // Create the projectile with the PROJECTILE type explicitly
-        AttackBox projectile(hitboxRect, 8.0f, 3.0f, 0.1f, stateManager.isFacingRight ? 0.0f : 180.0f, 15, 60, 
+        AttackBox projectile(hitboxRect, 8.0f, 3.0f, 0.1f, stateManager.isFacingRight ? 0.0f : 180.0f, 15, 60,
                             projectileVelocity, true);
         projectile.type = AttackBox::PROJECTILE;
         attacks.push_back(projectile);
@@ -850,7 +865,7 @@ void Character::pummel() {
         // Apply damage to grabbed opponent
         grabbedCharacter->applyDamage(2.0f);
         createHitEffect(grabbedCharacter->physics.position);
-        
+
         // Extend grab duration slightly
         stateManager.grabFrame -= 10;
         if (stateManager.grabFrame < 0) stateManager.grabFrame = 0;
@@ -861,14 +876,14 @@ void Character::forwardThrow() {
     if (stateManager.isGrabbing && grabbedCharacter != nullptr) {
         // Release and throw forward
         float direction = stateManager.isFacingRight ? 1.0f : -1.0f;
-        
+
         // Apply damage and knockback
         grabbedCharacter->applyDamage(8.0f);
         grabbedCharacter->applyKnockback(8.0f, 5.0f, 0.15f, direction, -0.2f);
-        
+
         // Create hit effect
         createHitEffect(grabbedCharacter->physics.position);
-        
+
         // Release the grab
         releaseGrab();
     }
@@ -878,14 +893,14 @@ void Character::backThrow() {
     if (stateManager.isGrabbing && grabbedCharacter != nullptr) {
         // Release and throw backward
         float direction = stateManager.isFacingRight ? -1.0f : 1.0f;
-        
+
         // Apply damage and knockback
         grabbedCharacter->applyDamage(10.0f);
         grabbedCharacter->applyKnockback(10.0f, 6.0f, 0.2f, direction, -0.1f);
-        
+
         // Create hit effect
         createHitEffect(grabbedCharacter->physics.position);
-        
+
         // Release the grab
         releaseGrab();
     }
@@ -894,14 +909,14 @@ void Character::backThrow() {
 void Character::upThrow() {
     if (stateManager.isGrabbing && grabbedCharacter != nullptr) {
         // Release and throw upward
-        
+
         // Apply damage and knockback
         grabbedCharacter->applyDamage(7.0f);
         grabbedCharacter->applyKnockback(7.0f, 5.0f, 0.15f, 0.0f, -1.0f);
-        
+
         // Create hit effect
         createHitEffect(grabbedCharacter->physics.position);
-        
+
         // Release the grab
         releaseGrab();
     }
@@ -910,14 +925,14 @@ void Character::upThrow() {
 void Character::downThrow() {
     if (stateManager.isGrabbing && grabbedCharacter != nullptr) {
         // Release and throw downward (bounce)
-        
+
         // Apply damage and knockback
         grabbedCharacter->applyDamage(6.0f);
         grabbedCharacter->applyKnockback(6.0f, 4.0f, 0.1f, 0.0f, 0.5f);
-        
+
         // Create hit effect
         createHitEffect(grabbedCharacter->physics.position);
-        
+
         // Release the grab
         releaseGrab();
     }
@@ -1048,7 +1063,7 @@ void Character::applyDamage(float damage) {
     }
 }
 
-void Character::applyKnockback(float damage, float baseKnockback, float knockbackScaling, 
+void Character::applyKnockback(float damage, float baseKnockback, float knockbackScaling,
                                float directionX, float directionY) {
     // THIS IS CORRECT: Calculate knockback based on damage and scaling
     float damageMultiplier = 1.0f + (damagePercent * GameConfig::DAMAGE_SCALING);
@@ -1074,7 +1089,11 @@ void Character::applyKnockback(float damage, float baseKnockback, float knockbac
 }
 
 void Character::createHitEffect(Vector2 position) {
+    // Keep original hit effect
     hitEffects.push_back(HitEffect(position, color));
+
+    // Add enhanced hit effect
+    visuals->addHitEffect(position, std::min(damagePercent / 20.0f, 3.0f), color);
 }
 
 // Death animation implementation
@@ -1184,11 +1203,11 @@ void Character::updateAttackPositions() {
     // Process each attack box
     for (auto it = attacks.begin(); it != attacks.end(); ) {
         auto& attack = *it;
-        
+
         // For projectiles - update independent movement
         if (attack.type == AttackBox::PROJECTILE) {
             bool isActive = attack.update();
-            
+
             // Check if projectile went off-screen
             bool offScreen = attack.rect.x < GameConfig::BLAST_ZONE_LEFT ||
                             attack.rect.x > GameConfig::BLAST_ZONE_RIGHT ||
@@ -1220,7 +1239,7 @@ void Character::updateAttackPositions() {
 
         // Update duration tracking for all attacks
         bool isActive = attack.update();
-        
+
         if (!isActive) {
             // Remove expired attacks
             it = attacks.erase(it);
@@ -1243,7 +1262,7 @@ void Character::startExplosionAnimation() {
     stateManager.explosionFrame = 0;
     stateManager.explosionDuration = 60; // 1 second explosion
     explosionParticles.clear();
-    
+
     // Clear all attacks when exploding
     resetAttackState();
 

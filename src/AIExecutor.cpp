@@ -1,6 +1,6 @@
 // AIExecutor.cpp
 #include "AIExecutor.h"
-#include "Character.h"
+#include "character/Character.h"
 #include "Platform.h"
 #include "Constants.h"
 #include "AttackOption.h" // Include specific attack options

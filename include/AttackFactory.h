@@ -1,7 +1,7 @@
 #ifndef ATTACK_FACTORY_H
 #define ATTACK_FACTORY_H
 
-#include "AttackBox.h"
+#include "attacks/AttackBox.h"
 #include <vector>
 
 // Forward declaration to avoid circular dependency

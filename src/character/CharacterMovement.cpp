@@ -1,5 +1,4 @@
 #include "../../include/character/CharacterMovement.h"
-#include "../../include/character/CharacterState.h"
 
 using CharacterState::IDLE;
 using CharacterState::RUNNING;

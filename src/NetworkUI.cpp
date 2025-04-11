@@ -524,7 +524,7 @@ void NetworkUI::showLobby() {
 
     // Initialize UI elements based on whether this is a host or client
     NetworkManager& netManager = NetworkManager::getInstance();
-    bool isHost = gameState->getNetworkMode() == NetworkedGameState::HOST;
+    bool isHost = gameState->getNetworkMode() == NetworkedGameState::SERVER;
     bool hasClients = !netManager.peers.empty();
     
     // Find start button and waiting label by name
@@ -628,7 +628,7 @@ void NetworkUI::onJoinGameClicked() {
 
 void NetworkUI::onStartMatchClicked() {
     // Only the host can start the match
-    if (gameState->getNetworkMode() != NetworkedGameState::HOST) {
+    if (gameState->getNetworkMode() != NetworkedGameState::SERVER) {
         std::cerr << "Non-host tried to start the match" << std::endl;
         return;
     }
@@ -720,7 +720,7 @@ void NetworkUI::refreshPlayerList() {
 
     // Display player list
     if (statusLabel) {
-        if (gameState->getNetworkMode() == NetworkedGameState::HOST) {
+        if (gameState->getNetworkMode() == NetworkedGameState::SERVER) {
             statusLabel->setText("Status: Hosting");
         } else {
             statusLabel->setText("Status: Connected as Client");
@@ -764,7 +764,7 @@ void NetworkUI::refreshPlayerList() {
     }
     
     // Update the start button and waiting message visibility
-    bool isHost = gameState->getNetworkMode() == NetworkedGameState::HOST;
+    bool isHost = gameState->getNetworkMode() == NetworkedGameState::SERVER;
     bool hasClients = netManager.peers.size() > 0;
 
     // Look for start button by name
@@ -1026,7 +1026,7 @@ void NetworkUI::createLobbyUI() {
     );
     // Initialize visibility based on host status and connected clients
     NetworkManager& netMgr = NetworkManager::getInstance();
-    bool isHost = gameState->getNetworkMode() == NetworkedGameState::HOST;
+    bool isHost = gameState->getNetworkMode() == NetworkedGameState::SERVER;
     bool hasClients = netMgr.peers.size() > 0;
     startButton->setVisible(isHost && hasClients);
     lobbyElements.push_back(startButton);

@@ -1,5 +1,5 @@
 #include "CharacterCollisionHandler.h"
-#include "Character.h"
+#include "character/Character.h"
 #include <cmath>
 #include <algorithm>
 

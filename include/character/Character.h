@@ -6,7 +6,7 @@
 #include "../attacks/AttackBox.h"
 #include "CharacterPhysics.h"
 #include "CharacterStateManager.h"
-#include "CharacterState.h"
+#include "CharacterVisuals.h"
 #include "HitEffect.h"
 #include "../Particle.h"
 #include <string>
@@ -24,10 +24,14 @@ public:
     float speed;
     Color color;
     std::string name;
+    CharacterVisuals* visuals;
+    CharacterStyle characterStyle;  // Note: using visualStyle instead of characterStyle
 
     // Core systems
     CharacterPhysics physics;
     CharacterStateManager stateManager;
+    CharacterState previousState;
+    float lastTrailTime;
 
     // Smash-style properties
     float damagePercent;    // Damage as percentage (0-999%)
@@ -55,7 +59,15 @@ public:
     std::vector<Particle> explosionParticles;
 
     // Constructor
-    Character(float x, float y, float w, float h, float spd, Color col, std::string n);
+    // Add to the constructor parameters:
+    Character(float x, float y, float w, float h, float spd, Color col, std::string n, CharacterStyle style = STYLE_BRAWLER);
+
+    // Add to the destructor:
+    ~Character();
+
+    // Add new methods:
+    void setVisualStyle(CharacterStyle style);
+    CharacterStyle getVisualStyle() const;
 
     // Accessors (for future transition to encapsulation)
     float getDamagePercent() const;
@@ -82,7 +94,7 @@ public:
     void respawn(Vector2 spawnPoint);
 
     // State management
-    void changeState(CharacterState::State newState);
+    void changeState(CharacterState newState);
     void resetAttackState();
 
     // Movement methods

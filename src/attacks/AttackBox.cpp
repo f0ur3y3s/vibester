@@ -1,68 +1,92 @@
-#include "../../include/attacks/AttackBox.h"
+#include "attacks/AttackBox.h"
 
-AttackBox::AttackBox(
-    Rectangle r, 
-    float dmg, 
-    float baseKb, 
-    float kbScaling, 
-    float kbAngle, 
-    int lag, 
-    int shield
-) 
-    : rect(r),
-      damage(dmg),
-      baseKnockback(baseKb),
-      knockbackScaling(kbScaling),
-      knockbackAngle(kbAngle),
-      hitLag(lag),
-      shieldStun(shield),
-      type(NORMAL),
-      isActive(true),
-      duration(10),
-      currentFrame(0),
-      velocity({0, 0}),
-      destroyOnHit(false)
+// Constructor for standard attack
+AttackBox::AttackBox(Rectangle r, float dmg, float baseKB, float kbScaling, float kbAngle, int hitstun, int dur)
 {
+    rect = r;
+    damage = dmg;
+    baseKnockback = baseKB;
+    knockbackScaling = kbScaling;
+    knockbackAngle = kbAngle;
+    hitstunFrames = hitstun;
+    duration = dur;
+    currentFrame = 0;
+    type = NORMAL;
+    canSpike = false;
+    shieldStun = 0;
+    ignoresShield = false;
+    causesFreeze = false;
+    freezeFrames = 0;
+    launchesUpward = false;
+    knockbackGrowth = 0.0f;
+    isActive = true;
+    velocity = {0, 0};
+    destroyOnHit = false;
 }
 
-AttackBox::AttackBox(
-    Rectangle r, 
-    float dmg, 
-    float baseKb, 
-    float kbScaling, 
-    float kbAngle, 
-    int lag, 
-    int dur,
-    Vector2 vel, 
-    bool destroy
-) 
-    : rect(r),
-      damage(dmg),
-      baseKnockback(baseKb),
-      knockbackScaling(kbScaling),
-      knockbackAngle(kbAngle),
-      hitLag(lag),
-      shieldStun(0),
-      type(PROJECTILE),
-      isActive(true),
-      duration(dur),
-      currentFrame(0),
-      velocity(vel),
-      destroyOnHit(destroy)
+// Constructor for projectile
+AttackBox::AttackBox(Rectangle r, float dmg, float baseKB, float kbScaling, float kbAngle, int hitstun, int dur,
+                     Vector2 vel, bool destroy = false)
 {
+    rect = r;
+    damage = dmg;
+    baseKnockback = baseKB;
+    knockbackScaling = kbScaling;
+    knockbackAngle = kbAngle;
+    hitstunFrames = hitstun;
+    duration = dur;
+    currentFrame = 0;
+    type = PROJECTILE;
+    canSpike = false;
+    shieldStun = 0;
+    ignoresShield = false;
+    causesFreeze = false;
+    freezeFrames = 0;
+    launchesUpward = false;
+    knockbackGrowth = 0.0f;
+    isActive = true;
+    velocity = vel;
+    destroyOnHit = destroy;
 }
 
+// Constructor for special hitbox types
+AttackBox::AttackBox(Rectangle r, float dmg, float baseKB, float kbScaling, float kbAngle, int hitstun, int dur,
+                     BoxType hitType)
+{
+    rect = r;
+    damage = dmg;
+    baseKnockback = baseKB;
+    knockbackScaling = kbScaling;
+    knockbackAngle = kbAngle;
+    hitstunFrames = hitstun;
+    duration = dur;
+    currentFrame = 0;
+    type = hitType;
+    canSpike = false;
+    shieldStun = 0;
+    ignoresShield = (type == COMMAND_GRAB);
+    causesFreeze = false;
+    freezeFrames = 0;
+    launchesUpward = false;
+    knockbackGrowth = 0.0f;
+    isActive = true;
+    velocity = {0, 0};
+    destroyOnHit = false;
+}
+
+// Methods
 bool AttackBox::update()
 {
     // For projectiles, update position
-    if (type == PROJECTILE) {
+    if (type == PROJECTILE)
+    {
         rect.x += velocity.x;
         rect.y += velocity.y;
     }
 
-    // Check duration
     currentFrame++;
-    if (currentFrame >= duration) {
+    if (currentFrame >= duration)
+    {
         isActive = false;
         return false;
     }
@@ -70,20 +94,70 @@ bool AttackBox::update()
     return true;
 }
 
-void AttackBox::draw(bool debug)
+void AttackBox::updatePosition(Vector2 ownerPos, bool isFacingRight)
 {
-    if (debug && isActive) {
-        // Draw hitbox visualization in debug mode
-        Color hitboxColor = {255, 0, 0, 128};
-        
-        // Different colors for different hitbox types
-        if (type == GRAB) {
-            hitboxColor = {0, 0, 255, 128}; // Blue for grabs
-        } else if (type == PROJECTILE) {
-            hitboxColor = {255, 255, 0, 128}; // Yellow for projectiles
-        }
-        
-        DrawRectangleRec(rect, hitboxColor);
-        DrawRectangleLinesEx(rect, 1.0f, RED);
+    if (type == PROJECTILE)
+    {
+        // Projectiles move independently once created
+        return;
     }
+
+    // Calculate offset based on facing direction
+    float offsetX = isFacingRight ? 1.0f : -1.0f;
+    float boxCenterX = ownerPos.x + (rect.width / 2) * offsetX;
+
+    // Adjust the rect position
+    rect.x = boxCenterX - (rect.width / 2);
+    rect.y = ownerPos.y - (rect.height / 2);
+}
+
+void AttackBox::draw(bool debugMode = false)
+{
+    if (!debugMode) return;
+
+    Color hitboxColor;
+    switch (type)
+    {
+    case GRAB:
+    case COMMAND_GRAB:
+        hitboxColor = {255, 100, 255, 128}; // Purple
+        break;
+    case PROJECTILE:
+        hitboxColor = {0, 255, 255, 128}; // Cyan
+        break;
+    case REFLECTOR:
+        hitboxColor = {0, 200, 255, 128}; // Blue
+        break;
+    case ABSORBER:
+        hitboxColor = {0, 255, 200, 128}; // Teal
+        break;
+    case WINDBOX:
+        hitboxColor = {200, 255, 200, 128}; // Light green
+        break;
+    default:
+        hitboxColor = {255, 0, 0, 128}; // Red
+        break;
+    }
+
+    DrawRectangleRec(rect, hitboxColor);
+    DrawRectangleLinesEx(rect, 2, {255, 255, 255, 200});
+}
+
+// Calculate final knockback based on target damage
+Vector2 AttackBox::calculateKnockback(float targetDamage, float chargeMultiplier = 1.0f)
+{
+    float angle = knockbackAngle * DEG2RAD;
+    float knockbackMagnitude = baseKnockback +
+        (damage * targetDamage * 0.05f * knockbackScaling * chargeMultiplier);
+
+    if (launchesUpward)
+    {
+        // Override angle to be upward
+        angle = 270.0f * DEG2RAD;
+    }
+
+    return {
+        cosf(angle) * knockbackMagnitude,
+        sinf(angle) * knockbackMagnitude
+    };
 }

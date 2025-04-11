@@ -3,8 +3,6 @@
 #define NETWORK_MANAGER_H
 
 #include "raylib.h"
-#include "Character.h"
-#include "GameState.h"
 #include <string>
 #include <vector>
 #include <queue>
@@ -13,7 +11,8 @@
 #include <atomic>
 
 // Define network message types
-enum NetworkMessageType {
+enum NetworkMessageType
+{
     MSG_CONNECT_REQUEST = 1,
     MSG_CONNECT_ACCEPT,
     MSG_CONNECT_DENY,
@@ -29,8 +28,9 @@ enum NetworkMessageType {
 };
 
 // Define player input state for networking
-struct NetworkInput {
-    uint32_t frame;          // Frame number this input was recorded on
+struct NetworkInput
+{
+    uint32_t frame; // Frame number this input was recorded on
 
     // Movement flags
     bool moveLeft;
@@ -59,11 +59,13 @@ struct NetworkInput {
 };
 
 // Define game state packet for synchronization
-struct GameStatePacket {
+struct GameStatePacket
+{
     uint32_t frame;
-    uint32_t checksum;  // For validation
+    uint32_t checksum; // For validation
     uint32_t extraData; // Extra data for game state sync
-    struct PlayerState {
+    struct PlayerState
+    {
         Vector2 position;
         Vector2 velocity;
         float damagePercent;
@@ -77,7 +79,8 @@ struct GameStatePacket {
 };
 
 // Connection info for peer-to-peer or client-server model
-struct PeerInfo {
+struct PeerInfo
+{
     std::string address;
     int port;
     bool isConnected;
@@ -87,7 +90,8 @@ struct PeerInfo {
     uint64_t lastPingTime;
 };
 
-class NetworkManager {
+class NetworkManager
+{
 public:
     // Singleton instance
     static NetworkManager& getInstance();
@@ -103,11 +107,13 @@ public:
     bool sendToAll(const void* data, int size);
 
     // Network mode
-    enum NetworkMode {
+    enum NetworkMode
+    {
         OFFLINE,
         SERVER,
         CLIENT
     };
+
     NetworkMode getMode() const { return mode; }
 
     // Session management
@@ -138,7 +144,7 @@ public:
     // Chat functionality
     void sendChatMessage(const std::string& message);
     bool receiveChatMessage(std::string& message);
-    
+
     // Game control messages
     bool hasGameStartMessage();
 
@@ -199,7 +205,7 @@ private:
     std::queue<GameStatePacket> stateQueue;
     std::queue<std::string> chatQueue;
     std::mutex queueMutex;
-    
+
     // Game control flags
     std::atomic<bool> gameStartReceived;
 

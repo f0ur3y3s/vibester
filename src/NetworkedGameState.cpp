@@ -10,12 +10,17 @@ NetworkedGameState::NetworkedGameState()
     : GameState()
     , networkMode(LOCAL_ONLY)
     , networkFrame(0)
+    , serverTickAccumulator(0.0f)
+    , serverTickRate(60)  // Default 60 ticks per second
+    , clientPredictionEnabled(true)
+    , lastAuthoritativeFrame(0)
+    , interpolationAlpha(0.0f)
     , inputDelayFrames(2)
     , frameAdvantage(0)
     , syncPercentage(100.0f)
     , newChatMessage(false)
     , spectatorMode(false)
-    , rollbackEnabled(true)
+    , rollbackEnabled(false)  // Disabled in client-server model
 {
     // Initialize with empty inputs for buffer
     NetworkInput emptyInput = {};
@@ -76,7 +81,7 @@ bool NetworkedGameState::hostGame(int port) {
     }
 
     // Set network mode
-    setNetworkMode(HOST);
+    setNetworkMode(SERVER);
 
     // Reset game state
     resetMatch();
@@ -121,7 +126,7 @@ void NetworkedGameState::disconnectFromGame() {
 bool NetworkedGameState::createNetworkMatch(const std::string& matchName) {
     NetworkManager& netManager = NetworkManager::getInstance();
     if (netManager.createMatch(matchName)) {
-        setNetworkMode(HOST);
+        setNetworkMode(SERVER);
         return true;
     }
     return false;
@@ -153,9 +158,6 @@ void NetworkedGameState::update() {
         return;
     }
 
-    // Process network messages
-    processRemoteInput();
-
     // Handle chat messages
     std::string chatMsg;
     while (netManager.receiveChatMessage(chatMsg)) {
@@ -168,107 +170,14 @@ void NetworkedGameState::update() {
 
     // Execute game state based on network mode
     switch (networkMode) {
-        case HOST:
-            // As host, we are the authority on game state
-            if (currentState == GAME_PLAYING) {
-                // Process local input first
-                sendLocalInput();
-
-                // Update players
-                for (auto& player : players) {
-                    player->update(platforms);
-                }
-
-                // Check for character collisions for attacks
-                for (auto& attacker : players) {
-                    if (attacker->stateManager.isAttacking) {
-                        for (auto& defender : players) {
-                            if (attacker != defender) {
-                                attacker->checkHit(*defender);
-                            }
-                        }
-                    }
-                }
-
-                // Update items, particles, etc.
-                GameState::update();
-
-                // Synchronize game state to clients
-                synchronizeGameState();
-
-                // Special handling for newly started game
-                static bool sentExtraStartMessage = false;
-                if (!sentExtraStartMessage && currentState == GAME_PLAYING) {
-                    std::cout << "Host: Sending extra game start message to ensure client starts" << std::endl;
-                    uint8_t startGameMsg[1];
-                    startGameMsg[0] = MSG_GAME_START;
-                    for (int i = 0; i < 5; i++) {  // Send multiple times to ensure delivery
-                        netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
-                        // Small delay between messages
-                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                    }
-                    sentExtraStartMessage = true;
-                }
-
-                // Increment network frame
-                networkFrame++;
-            } else {
-                // For menus, etc. just use normal update
-                GameState::update();
-            }
+        case SERVER:
+            // Server-specific update logic
+            updateAsServer();
             break;
 
         case CLIENT:
-            {
-                // Check if host has started the game
-                bool gameStarted = netManager.hasGameStartMessage();
-
-                if (gameStarted) {
-                    std::cout << "CLIENT: Game start message detected - starting game!" << std::endl;
-
-                    // Set the network UI state to HIDDEN in Game.cpp by notifying external code
-                    extern bool showNetworkMenu;
-                    showNetworkMenu = false;
-
-                    // Change the game state to start
-                    std::cout << "CLIENT: Changing game state to GAME_START" << std::endl;
-                    changeState(GameState::GAME_START);
-                }
-            }
-
-            // As client, we follow the host's state
-            if (currentState == GAME_PLAYING) {
-                // Process local input and send it to the host
-                sendLocalInput();
-
-                // Update players
-                for (auto& player : players) {
-                    player->update(platforms);
-                }
-
-                // Check for character collisions for attacks
-                for (auto& attacker : players) {
-                    if (attacker->stateManager.isAttacking) {
-                        for (auto& defender : players) {
-                            if (attacker != defender) {
-                                attacker->checkHit(*defender);
-                            }
-                        }
-                    }
-                }
-
-                // Update other game elements
-                GameState::update();
-
-                // Apply any state corrections from server
-                synchronizeGameState();
-
-                // Increment network frame
-                networkFrame++;
-            } else {
-                // For menus, etc. just use normal update
-                GameState::update();
-            }
+            // Client-specific update logic
+            updateAsClient();
             break;
 
         case LOCAL_ONLY:
@@ -286,10 +195,10 @@ void NetworkedGameState::draw() {
     // Add network-specific UI elements
     if (networkMode != LOCAL_ONLY) {
         // Show connection status
-        Color statusColor = (networkMode == HOST) ? GREEN : BLUE;
+        Color statusColor = (networkMode == SERVER) ? GREEN : BLUE;
         DrawText(
-            (networkMode == HOST) ? "SERVER" : "CLIENT",
-            SCREEN_WIDTH - 100, 10, 20, statusColor
+            (networkMode == SERVER) ? "SERVER" : "CLIENT",
+            GameConfig::SCREEN_WIDTH - 100, 10, 20, statusColor
         );
 
         // Show ping
@@ -297,25 +206,25 @@ void NetworkedGameState::draw() {
         Color pingColor = (ping < 50) ? GREEN : (ping < 100) ? YELLOW : RED;
         DrawText(
             TextFormat("Ping: %d ms", ping),
-            SCREEN_WIDTH - 150, 35, 16, pingColor
+            GameConfig::SCREEN_WIDTH - 150, 35, 16, pingColor
         );
 
         // Show frame advantage (in debug mode)
         if (debugMode) {
             DrawText(
                 TextFormat("Frame Adv: %d", frameAdvantage),
-                SCREEN_WIDTH - 150, 55, 16, WHITE
+                GameConfig::SCREEN_WIDTH - 150, 55, 16, WHITE
             );
 
             DrawText(
                 TextFormat("Sync: %.1f%%", syncPercentage),
-                SCREEN_WIDTH - 150, 75, 16, WHITE
+                GameConfig::SCREEN_WIDTH - 150, 75, 16, WHITE
             );
         }
 
         // Display chat messages when active
         if (!chatHistory.empty()) {
-            int chatY = SCREEN_HEIGHT - 150;
+            int chatY = GameConfig::SCREEN_HEIGHT - 150;
 
             // Draw chat background
             DrawRectangle(10, chatY - 5, 400, 125, Fade(BLACK, 0.7f));
@@ -375,7 +284,7 @@ void NetworkedGameState::processRemoteInput() {
 
         // Apply to remote player - FIXED: Use correct player indices
         if (players.size() >= 2) {
-            Character* remotePlayer = (networkMode == HOST) ? players[1] : players[0];
+            Character* remotePlayer = (networkMode == SERVER) ? players[1] : players[0];
             applyNetworkInput(remotePlayer, currentRemoteInput);
         }
     }
@@ -401,14 +310,14 @@ void NetworkedGameState::sendLocalInput() {
     netManager.sendInput(currentLocalInput);
 
     // Apply to local player - FIXED: Use correct player indices
-    Character* localPlayer = (networkMode == HOST) ? players[0] : players[1];
+    Character* localPlayer = (networkMode == SERVER) ? players[0] : players[1];
     applyNetworkInput(localPlayer, currentLocalInput);
 }
 
 void NetworkedGameState::synchronizeGameState() {
     NetworkManager& netManager = NetworkManager::getInstance();
 
-    if (networkMode == HOST) {
+    if (networkMode == SERVER) {
         // Server: send authoritative game state periodically
         if (networkFrame % 10 == 0) {  // Every 10 frames
             GameStatePacket statePacket;
@@ -659,7 +568,7 @@ bool NetworkedGameState::receiveChatMessage(std::string& message) {
 
 void NetworkedGameState::changeState(GameState::State newState) {
     // Handle network-specific state changes
-    if (newState == GAME_START && networkMode == HOST) {
+    if (newState == GAME_START && networkMode == SERVER) {
         // Send game start message to all clients
         NetworkManager& netManager = NetworkManager::getInstance();
         uint8_t startGameMsg[1];
@@ -939,4 +848,286 @@ bool NetworkManager::receiveChatMessage(std::string& message) {
     message = chatQueue.front();
     chatQueue.pop();
     return true;
+}
+
+// Send authoritative game state to all clients (server only)
+void NetworkedGameState::sendServerStateUpdate() {
+    NetworkManager& netManager = NetworkManager::getInstance();
+
+    // Create game state packet
+    GameStatePacket statePacket;
+    constructGameStatePacket(statePacket);
+
+    // Send to all clients
+    netManager.sendGameState(statePacket);
+    
+    // Debug output
+    std::cout << "Server sending state update for frame " << networkFrame << std::endl;
+}
+
+// Server-specific update logic
+void NetworkedGameState::updateAsServer() {
+    // Only process game logic if in GAME_PLAYING state
+    if (currentState == GAME_PLAYING) {
+        // Process remote inputs from clients
+        NetworkManager& netManager = NetworkManager::getInstance();
+        NetworkInput clientInput;
+
+        // Process all pending client inputs
+        while (netManager.getRemoteInput(clientInput)) {
+            // For simplicity, the client id is always 1 (player 1)
+            // Server is always player 0
+            int clientId = 1;
+            
+            // Apply input to the appropriate player character
+            if (clientId > 0 && clientId < players.size()) {
+                Character* character = players[clientId];
+                applyNetworkInput(character, clientInput);
+                
+                // Debug output
+                std::cout << "Server received input from client with ID " << clientId 
+                          << " for frame " << clientInput.frame << std::endl;
+            }
+        }
+
+        // Calculate time between ticks for fixed update rate
+        float deltaTime = GetFrameTime();
+        serverTickAccumulator += deltaTime;
+
+        // Fixed update at server tick rate
+        float tickInterval = 1.0f / serverTickRate;
+        while (serverTickAccumulator >= tickInterval) {
+            // Process server's own input
+            sendLocalInput();
+            
+            // Update game state
+            GameState::update();
+
+            // Update network frame counter
+            networkFrame++;
+
+            // Send authoritative state to clients periodically
+            if (networkFrame % 2 == 0) { // Every 2 frames (~30Hz with 60fps tick rate)
+                sendServerStateUpdate();
+            }
+
+            serverTickAccumulator -= tickInterval;
+        }
+        
+        // Always update players for collisions/movement even outside fixed updates
+        for (auto& player : players) {
+            player->update(platforms);
+        }
+        
+        // Check for character collisions for attacks
+        for (auto& attacker : players) {
+            if (attacker->stateManager.isAttacking) {
+                for (auto& defender : players) {
+                    if (attacker != defender) {
+                        attacker->checkHit(*defender);
+                    }
+                }
+            }
+        }
+    } else {
+        // For menus, etc. just use normal update
+        GameState::update();
+
+        // Special handling for game start
+        if (currentState == GAME_START) {
+            // Notify clients when game is starting
+            if (stateTimer == 0) {
+                // Send game start message to all clients
+                NetworkManager& netManager = NetworkManager::getInstance();
+                uint8_t startGameMsg[1];
+                startGameMsg[0] = MSG_GAME_START;
+
+                // Send multiple times to ensure delivery
+                for (int i = 0; i < 5; i++) {
+                    netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+                }
+                std::cout << "Server: Sent game start message to all clients" << std::endl;
+            }
+        }
+    }
+}
+
+// Client-specific update logic
+void NetworkedGameState::updateAsClient() {
+    // Check if server has started the game
+    NetworkManager& netManager = NetworkManager::getInstance();
+    bool gameStarted = netManager.hasGameStartMessage();
+
+    if (gameStarted && currentState != GAME_PLAYING && currentState != GAME_START) {
+        std::cout << "Client: Received game start message - starting game!" << std::endl;
+
+        // Set the network UI state to HIDDEN in Game.cpp
+        extern bool showNetworkMenu;
+        showNetworkMenu = false;
+
+        // Change to game start state
+        changeState(GameState::GAME_START);
+        
+        // Wait a moment to process
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    
+    // Force player updates even in non-gameplay states for smooth transition
+    for (auto& player : players) {
+        player->update(platforms);
+    }
+
+    if (currentState == GAME_PLAYING) {
+        // In spectator mode, we only receive and display state
+        if (spectatorMode) {
+            // Apply server state
+            GameStatePacket serverState;
+            if (netManager.getRemoteGameState(serverState)) {
+                // Directly apply the server state
+                for (int i = 0; i < std::min(2, (int)players.size()); i++) {
+                    players[i]->physics.position = serverState.players[i].position;
+                    players[i]->physics.velocity = serverState.players[i].velocity;
+                    players[i]->damagePercent = serverState.players[i].damagePercent;
+                    players[i]->stocks = serverState.players[i].stocks;
+                    players[i]->stateManager.state = (CharacterState)(serverState.players[i].stateID);
+                    players[i]->stateManager.isFacingRight = serverState.players[i].isFacingRight;
+                    players[i]->stateManager.isAttacking = serverState.players[i].isAttacking;
+                    players[i]->stateManager.currentAttack = (AttackType)(serverState.players[i].currentAttack);
+                    players[i]->stateManager.attackFrame = serverState.players[i].attackFrame;
+                }
+            }
+            
+            // Just increment the frame counter
+            networkFrame++;
+        } 
+        else {
+            // Normal client mode - capture and send input to server
+            sendLocalInput();
+
+            // Always run simulation for responsiveness but with client prediction
+            if (clientPredictionEnabled) {
+                // Update character physics
+                int clientId = netManager.getPlayerID();
+                if (clientId > 0 && clientId < players.size()) {
+                    // Only apply physics for client's own character
+                    players[clientId]->update(platforms);
+                }
+            }
+
+            // Apply server corrections
+            GameStatePacket serverState;
+            if (netManager.getRemoteGameState(serverState)) {
+                std::cout << "Client received state update from server" << std::endl;
+                applyServerState(serverState);
+            }
+
+            // Update network frame
+            networkFrame++;
+        }
+    } else {
+        // For menus, etc. just use normal update
+        GameState::update();
+    }
+}
+
+// Apply server state updates to client (client only)
+void NetworkedGameState::applyServerState(const GameStatePacket& serverState) {
+    // If this is a very old state, ignore it
+    if (serverState.frame < lastAuthoritativeFrame) {
+        return;
+    }
+
+    // Update last authoritative frame
+    lastAuthoritativeFrame = serverState.frame;
+    
+    // Debug output
+    std::cout << "Client applying server state from frame " << serverState.frame 
+              << " at client frame " << networkFrame << std::endl;
+
+    // Check for game state information from server
+    if (serverState.extraData >= GameState::GAME_START &&
+        serverState.extraData <= GameState::RESULTS_SCREEN &&
+        currentState != (GameState::State)serverState.extraData) {
+
+        // Server is in a different state, we need to match it
+        GameState::State serverGameState = (GameState::State)serverState.extraData;
+        std::cout << "CLIENT: Server is in state " << serverGameState
+                  << " but client is in state " << currentState
+                  << ". Syncing states." << std::endl;
+
+        if (serverGameState == GameState::GAME_START || serverGameState == GameState::GAME_PLAYING) {
+            // Force hiding the network UI
+            extern bool showNetworkMenu;
+            showNetworkMenu = false;
+            std::cout << "CLIENT: Setting showNetworkMenu to false" << std::endl;
+        }
+
+        // Change to match server's state
+        changeState(serverGameState);
+    }
+
+    // Calculate the frame difference
+    int frameDiff = networkFrame - serverState.frame;
+
+    // Client-side reconciliation based on server authority
+    int clientId = NetworkManager::getInstance().getPlayerID();
+    if (clientId >= 0 && clientId < players.size()) {
+        // Update player 0 (server-controlled) directly from server state
+        if (players.size() > 0) {
+            players[0]->physics.position = serverState.players[0].position;
+            players[0]->physics.velocity = serverState.players[0].velocity;
+            players[0]->damagePercent = serverState.players[0].damagePercent;
+            players[0]->stocks = serverState.players[0].stocks;
+            players[0]->stateManager.state = (CharacterState)(serverState.players[0].stateID);
+            players[0]->stateManager.isFacingRight = serverState.players[0].isFacingRight;
+            players[0]->stateManager.isAttacking = serverState.players[0].isAttacking;
+            players[0]->stateManager.currentAttack = (AttackType)(serverState.players[0].currentAttack);
+            players[0]->stateManager.attackFrame = serverState.players[0].attackFrame;
+        }
+        
+        // For client's own character, apply smoothed correction only if significant error
+        if (clientId < 2) { // Players array has fixed size of 2
+            Vector2 serverPos = serverState.players[clientId].position;
+            Vector2 clientPos = players[clientId]->physics.position;
+            
+            float dist = std::sqrt(
+                (serverPos.x - clientPos.x) * (serverPos.x - clientPos.x) +
+                (serverPos.y - clientPos.y) * (serverPos.y - clientPos.y)
+            );
+            
+            // Apply correction based on distance
+            if (dist > 30.0f) {
+                // Major desync - stronger correction
+                players[clientId]->physics.position.x = clientPos.x + (serverPos.x - clientPos.x) * 0.5f;
+                players[clientId]->physics.position.y = clientPos.y + (serverPos.y - clientPos.y) * 0.5f;
+                // Also adopt server velocity for major corrections
+                players[clientId]->physics.velocity = serverState.players[clientId].velocity;
+                syncPercentage = 60.0f;
+            }
+            else if (dist > 10.0f) {
+                // Minor desync - gentle correction
+                players[clientId]->physics.position.x = clientPos.x + (serverPos.x - clientPos.x) * 0.2f;
+                players[clientId]->physics.position.y = clientPos.y + (serverPos.y - clientPos.y) * 0.2f;
+                syncPercentage = 80.0f;
+            }
+            else {
+                // Good sync - minimal correction
+                syncPercentage = 100.0f;
+            }
+        }
+        
+        // Critical state always comes from server (stocks, damage, etc.)
+        if (clientId < 2) { // Players array has fixed size of 2
+            players[clientId]->stocks = serverState.players[clientId].stocks;
+            players[clientId]->damagePercent = serverState.players[clientId].damagePercent;
+            
+            // For attack state, server is authoritative
+            bool serverIsAttacking = serverState.players[clientId].isAttacking;
+            if (serverIsAttacking != players[clientId]->stateManager.isAttacking) {
+                players[clientId]->stateManager.isAttacking = serverIsAttacking;
+                players[clientId]->stateManager.currentAttack = (AttackType)(serverState.players[clientId].currentAttack);
+                players[clientId]->stateManager.attackFrame = serverState.players[clientId].attackFrame;
+            }
+        }
+    }
 }
