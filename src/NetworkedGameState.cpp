@@ -895,3 +895,48 @@ uint32_t NetworkedGameState::calculateStateChecksum(const GameStatePacket& state
     // Convert to 32-bit uint
     return static_cast<uint32_t>(hash_val & 0xFFFFFFFF);
 }
+
+void NetworkManager::sendChatMessage(const std::string& message) {
+    if (!connected || message.empty()) {
+        return;
+    }
+
+    // Construct chat message packet
+    std::vector<uint8_t> packet;
+    packet.push_back(MSG_CHAT);
+
+    // Add player ID (4 bytes)
+    uint32_t playerID = localPlayerID;
+    packet.insert(packet.end(), reinterpret_cast<uint8_t*>(&playerID),
+                 reinterpret_cast<uint8_t*>(&playerID) + sizeof(playerID));
+
+    // Add message length (2 bytes)
+    uint16_t msgLength = static_cast<uint16_t>(message.length());
+    packet.insert(packet.end(), reinterpret_cast<uint8_t*>(&msgLength),
+                 reinterpret_cast<uint8_t*>(&msgLength) + sizeof(msgLength));
+
+    // Add message content
+    packet.insert(packet.end(), message.begin(), message.end());
+
+    // Send the packet
+    if (mode == CLIENT) {
+        sendMessage(packet.data(), packet.size(), serverAddress, serverPort);
+    } else if (mode == SERVER) {
+        // Server broadcasts to all clients
+        sendToAll(packet.data(), packet.size());
+    }
+
+    std::cout << "Chat message sent: " << message << std::endl;
+}
+
+// Receive a chat message from the queue
+bool NetworkManager::receiveChatMessage(std::string& message) {
+    std::lock_guard<std::mutex> lock(queueMutex);
+    if (chatQueue.empty()) {
+        return false;
+    }
+
+    message = chatQueue.front();
+    chatQueue.pop();
+    return true;
+}

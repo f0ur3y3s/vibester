@@ -111,11 +111,14 @@ public:
     NetworkMode getMode() const { return mode; }
 
     // Session management
-    bool isConnected() const { return connected; }
     bool isHost() const { return mode == SERVER; }
     int getPlayerID() const { return localPlayerID; }
-    void setLocalPlayerName(const std::string& name) { localPlayerName = name; }
-    std::string getLocalPlayerName() const { return localPlayerName; }
+    void handlePong(const uint8_t* data, int size);
+    bool isConnected() const;
+    int getAveragePing() const;
+    std::string getLocalPlayerName() const;
+    void setLocalPlayerName(const std::string& name);
+
 
     // Matchmaking
     bool createMatch(const std::string& matchName);
@@ -138,9 +141,6 @@ public:
     
     // Game control messages
     bool hasGameStartMessage();
-    
-    // Ping statistics
-    int getAveragePing() const { return averagePing; }
 
     // Network configuration
     static constexpr int BUFFER_SIZE = 2048;
