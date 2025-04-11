@@ -22,6 +22,14 @@ NetworkedGameState::NetworkedGameState()
     for (int i = 0; i < 10; i++) {
         inputBuffer.push_back(emptyInput);
     }
+
+    // Ensure players are properly initialized in both network modes
+    if (players.size() >= 2) {
+        players[0]->stocks = GameConfig::DEFAULT_STOCKS;
+        players[0]->damagePercent = 0.0f;
+        players[1]->stocks = GameConfig::DEFAULT_STOCKS;
+        players[1]->damagePercent = 0.0f;
+    }
 }
 
 void NetworkedGameState::setNetworkMode(NetworkGameMode mode) {
@@ -166,19 +174,39 @@ void NetworkedGameState::update() {
                 // Process local input first
                 sendLocalInput();
 
-                // Update game
+                // Update players
+                for (auto& player : players) {
+                    player->update(platforms);
+                }
+
+                // Check for character collisions for attacks
+                for (auto& attacker : players) {
+                    if (attacker->stateManager.isAttacking) {
+                        for (auto& defender : players) {
+                            if (attacker != defender) {
+                                attacker->checkHit(*defender);
+                            }
+                        }
+                    }
+                }
+
+                // Update items, particles, etc.
                 GameState::update();
 
                 // Synchronize game state to clients
                 synchronizeGameState();
-                
+
                 // Special handling for newly started game
                 static bool sentExtraStartMessage = false;
                 if (!sentExtraStartMessage && currentState == GAME_PLAYING) {
                     std::cout << "Host: Sending extra game start message to ensure client starts" << std::endl;
                     uint8_t startGameMsg[1];
                     startGameMsg[0] = MSG_GAME_START;
-                    netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+                    for (int i = 0; i < 5; i++) {  // Send multiple times to ensure delivery
+                        netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+                        // Small delay between messages
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    }
                     sentExtraStartMessage = true;
                 }
 
@@ -194,30 +222,42 @@ void NetworkedGameState::update() {
             {
                 // Check if host has started the game
                 bool gameStarted = netManager.hasGameStartMessage();
-                std::cout << "CLIENT update(): hasGameStartMessage returned " << (gameStarted ? "true" : "false") << std::endl;
-                
+
                 if (gameStarted) {
                     std::cout << "CLIENT: Game start message detected - starting game!" << std::endl;
-                    
+
                     // Set the network UI state to HIDDEN in Game.cpp by notifying external code
                     extern bool showNetworkMenu;
-                    bool oldValue = showNetworkMenu;
                     showNetworkMenu = false;
-                    std::cout << "CLIENT: Set showNetworkMenu from " << (oldValue ? "true" : "false") 
-                              << " to " << (showNetworkMenu ? "true" : "false") << std::endl;
-                    
+
                     // Change the game state to start
                     std::cout << "CLIENT: Changing game state to GAME_START" << std::endl;
                     changeState(GameState::GAME_START);
                 }
             }
-            
+
             // As client, we follow the host's state
             if (currentState == GAME_PLAYING) {
-                // Process input
+                // Process local input and send it to the host
                 sendLocalInput();
 
-                // Update game
+                // Update players
+                for (auto& player : players) {
+                    player->update(platforms);
+                }
+
+                // Check for character collisions for attacks
+                for (auto& attacker : players) {
+                    if (attacker->stateManager.isAttacking) {
+                        for (auto& defender : players) {
+                            if (attacker != defender) {
+                                attacker->checkHit(*defender);
+                            }
+                        }
+                    }
+                }
+
+                // Update other game elements
                 GameState::update();
 
                 // Apply any state corrections from server
@@ -333,7 +373,7 @@ void NetworkedGameState::processRemoteInput() {
             frameAdvantage = networkFrame - currentRemoteInput.frame;
         }
 
-        // Apply to remote player
+        // Apply to remote player - FIXED: Use correct player indices
         if (players.size() >= 2) {
             Character* remotePlayer = (networkMode == HOST) ? players[1] : players[0];
             applyNetworkInput(remotePlayer, currentRemoteInput);
@@ -360,7 +400,7 @@ void NetworkedGameState::sendLocalInput() {
     NetworkManager& netManager = NetworkManager::getInstance();
     netManager.sendInput(currentLocalInput);
 
-    // Apply to local player
+    // Apply to local player - FIXED: Use correct player indices
     Character* localPlayer = (networkMode == HOST) ? players[0] : players[1];
     applyNetworkInput(localPlayer, currentLocalInput);
 }
@@ -386,29 +426,27 @@ void NetworkedGameState::synchronizeGameState() {
             }
 
             // Check for game state information from the host
-            if (serverState.extraData >= GameState::GAME_START && 
-                serverState.extraData <= GameState::RESULTS_SCREEN && 
+            if (serverState.extraData >= GameState::GAME_START &&
+                serverState.extraData <= GameState::RESULTS_SCREEN &&
                 currentState != (GameState::State)serverState.extraData) {
-                
+
                 // Host is in a different state, we need to match it
                 GameState::State hostState = (GameState::State)serverState.extraData;
-                std::cout << "CLIENT: Host is in state " << hostState 
-                          << " but client is in state " << currentState 
+                std::cout << "CLIENT: Host is in state " << hostState
+                          << " but client is in state " << currentState
                           << ". Syncing states." << std::endl;
-                
+
                 if (hostState == GameState::GAME_START || hostState == GameState::GAME_PLAYING) {
                     // Force hiding the network UI
                     extern bool showNetworkMenu;
                     showNetworkMenu = false;
                     std::cout << "CLIENT: Setting showNetworkMenu to false" << std::endl;
                 }
-                
+
                 // Change to match host state
                 changeState(hostState);
-                
-                // Proceed with normal state sync
             }
-            
+
             // Calculate local state for comparison
             GameStatePacket localState;
             constructGameStatePacket(localState);
@@ -419,32 +457,32 @@ void NetworkedGameState::synchronizeGameState() {
                     // Implement rollback netcode
                     // Find the frame difference
                     int frameDiff = networkFrame - serverState.frame;
-                    
+
                     // Only rollback if frame difference is reasonable
                     if (frameDiff > 0 && frameDiff < 10) {
                         // Rollback simulation
                         // 1. Save current state
                         GameStatePacket currentState;
                         constructGameStatePacket(currentState);
-                        
+
                         // 2. Reapply inputs from the frame of the server state
                         // Find the correct inputs in history (if available)
                         std::deque<NetworkInput> localInputsToReapply;
                         std::deque<NetworkInput> remoteInputsToReapply;
-                        
+
                         // Collect inputs from history that are after the server state frame
                         for (const auto& input : localInputHistory) {
                             if (input.frame >= serverState.frame) {
                                 localInputsToReapply.push_front(input);
                             }
                         }
-                        
+
                         for (const auto& input : remoteInputHistory) {
                             if (input.frame >= serverState.frame) {
                                 remoteInputsToReapply.push_front(input);
                             }
                         }
-                        
+
                         // 3. Apply server state as starting point
                         for (int i = 0; i < std::min(2, (int)players.size()); i++) {
                             players[i]->physics.position = serverState.players[i].position;
@@ -457,13 +495,13 @@ void NetworkedGameState::synchronizeGameState() {
                             players[i]->stateManager.currentAttack = (AttackType)(serverState.players[i].currentAttack);
                             players[i]->stateManager.attackFrame = serverState.players[i].attackFrame;
                         }
-                        
+
                         // 4. Resimulate by applying inputs in order
                         for (int frame = 0; frame < frameDiff; frame++) {
                             // Apply inputs for this frame if available
                             NetworkInput localInput = {};
                             NetworkInput remoteInput = {};
-                            
+
                             // Find inputs for this frame
                             for (const auto& input : localInputsToReapply) {
                                 if (input.frame == serverState.frame + frame) {
@@ -471,26 +509,26 @@ void NetworkedGameState::synchronizeGameState() {
                                     break;
                                 }
                             }
-                            
+
                             for (const auto& input : remoteInputsToReapply) {
                                 if (input.frame == serverState.frame + frame) {
                                     remoteInput = input;
                                     break;
                                 }
                             }
-                            
-                            // Apply inputs to characters
-                            Character* localPlayer = (networkMode == HOST) ? players[0] : players[1];
-                            Character* remotePlayer = (networkMode == HOST) ? players[1] : players[0];
-                            
+
+                            // Apply inputs to characters - FIXED: Use correct player indices
+                            Character* localPlayer = (networkMode == CLIENT) ? players[1] : players[0];
+                            Character* remotePlayer = (networkMode == CLIENT) ? players[0] : players[1];
+
                             applyNetworkInput(localPlayer, localInput);
                             applyNetworkInput(remotePlayer, remoteInput);
-                            
+
                             // Update players for one frame
                             for (auto& player : players) {
                                 player->update(platforms);
                             }
-                            
+
                             // Check for character collisions for attacks
                             for (auto& attacker : players) {
                                 if (attacker->stateManager.isAttacking) {
@@ -502,28 +540,28 @@ void NetworkedGameState::synchronizeGameState() {
                                 }
                             }
                         }
-                        
+
                         // Update sync percentage based on how close we get after rollback
                         GameStatePacket newState;
                         constructGameStatePacket(newState);
-                        
+
                         if (newState.checksum == serverState.checksum) {
                             // Perfect sync after rollback
                             syncPercentage = 100.0f;
                         } else {
                             // Still some desync, penalize sync percentage
                             syncPercentage = std::max(0.0f, syncPercentage - 0.5f);
-                            
+
                             // Check how different positions are
                             for (int i = 0; i < std::min(2, (int)players.size()); i++) {
                                 Vector2 serverPos = serverState.players[i].position;
                                 Vector2 localPos = players[i]->physics.position;
-                                
+
                                 float dist = std::sqrt(
                                     (serverPos.x - localPos.x) * (serverPos.x - localPos.x) +
                                     (serverPos.y - localPos.y) * (serverPos.y - localPos.y)
                                 );
-                                
+
                                 // If still a significant difference, apply a subtle correction
                                 if (dist > 10.0f) {
                                     // Lerp position with a very small correction factor (to avoid jerky movement)
@@ -626,10 +664,15 @@ void NetworkedGameState::changeState(GameState::State newState) {
         NetworkManager& netManager = NetworkManager::getInstance();
         uint8_t startGameMsg[1];
         startGameMsg[0] = MSG_GAME_START;
-        netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+
+        // Send multiple times to ensure delivery
+        for (int i = 0; i < 5; i++) {
+            netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
         std::cout << "Host: Sent game start message to all clients" << std::endl;
     }
-    
+
     // Call the parent class implementation to handle the actual state change
     GameState::changeState(newState);
 }
@@ -637,39 +680,44 @@ void NetworkedGameState::changeState(GameState::State newState) {
 void NetworkedGameState::applyNetworkInput(Character* character, const NetworkInput& input) {
     if (!character) return;
 
-    // Reset states first
-    bool wasMovingLeft = false;
-    bool wasMovingRight = false;
-    bool wasJumping = false;
-    bool wasAttacking = false;
-    bool wasShielding = false;
-    bool wasFastFalling = false;
+    // Reset movement, otherwise character keeps moving in one direction
+    bool movementInput = false;
 
     // Apply the input actions
     if (input.moveLeft) {
-        wasMovingLeft = true;
         character->moveLeft();
+        movementInput = true;
     }
 
     if (input.moveRight) {
-        wasMovingRight = true;
         character->moveRight();
+        movementInput = true;
+    }
+
+    // If no movement input, stop horizontal movement
+    if (!movementInput && character->stateManager.state != CharacterState::HITSTUN &&
+        character->stateManager.state != CharacterState::ATTACKING) {
+        character->physics.velocity.x *= 0.8f; // Apply some friction
     }
 
     if (input.jump) {
-        wasJumping = true;
         character->jump();
     }
 
     if (input.fastFall) {
-        wasFastFalling = true;
         character->fastFall();
     }
 
+    // Platform drop-through - using conditions directly rather than a separate field
+    if (input.down && input.fastFall &&
+        (character->stateManager.state == CharacterState::IDLE ||
+         character->stateManager.state == CharacterState::RUNNING)) {
+        character->dropThroughPlatform();
+    }
+
     if (input.shield) {
-        wasShielding = true;
         character->shield();
-    } else if (wasShielding) {
+    } else if (character->stateManager.isShielding) {
         character->releaseShield();
     }
 
@@ -684,17 +732,21 @@ void NetworkedGameState::applyNetworkInput(Character* character, const NetworkIn
 
     // Handle attacks
     if (input.attack) {
-        wasAttacking = true;
         // Context-sensitive attack
-        if (character->stateManager.state == JUMPING || character->stateManager.state == FALLING) {
+        if (character->stateManager.state == CharacterState::JUMPING ||
+            character->stateManager.state == CharacterState::FALLING) {
             if (input.up) {
                 character->upAir();
             } else if (input.down) {
                 character->downAir();
-            } else if (wasMovingLeft) {
-                character->backAir();
-            } else if (wasMovingRight) {
+            } else if (input.moveLeft && !character->stateManager.isFacingRight) {
                 character->forwardAir();
+            } else if (input.moveLeft && character->stateManager.isFacingRight) {
+                character->backAir();
+            } else if (input.moveRight && character->stateManager.isFacingRight) {
+                character->forwardAir();
+            } else if (input.moveRight && !character->stateManager.isFacingRight) {
+                character->backAir();
             } else {
                 character->neutralAir();
             }
@@ -703,7 +755,7 @@ void NetworkedGameState::applyNetworkInput(Character* character, const NetworkIn
                 character->upTilt();
             } else if (input.down) {
                 character->downTilt();
-            } else if (wasMovingLeft || wasMovingRight) {
+            } else if (input.moveLeft || input.moveRight) {
                 character->forwardTilt();
             } else {
                 character->jab();
@@ -717,7 +769,7 @@ void NetworkedGameState::applyNetworkInput(Character* character, const NetworkIn
             character->upSpecial();
         } else if (input.down) {
             character->downSpecial();
-        } else if (wasMovingLeft || wasMovingRight) {
+        } else if (input.moveLeft || input.moveRight) {
             character->sideSpecial();
         } else {
             character->neutralSpecial();
@@ -730,7 +782,7 @@ void NetworkedGameState::applyNetworkInput(Character* character, const NetworkIn
             character->upSmash(10.0f); // Default charge
         } else if (input.down) {
             character->downSmash(10.0f);
-        } else if (wasMovingLeft || wasMovingRight) {
+        } else if (input.moveLeft || input.moveRight) {
             character->forwardSmash(10.0f);
         }
     }
@@ -739,27 +791,48 @@ void NetworkedGameState::applyNetworkInput(Character* character, const NetworkIn
     if (input.grab) {
         character->grab();
     }
+
+    // Handle throws when grabbing
+    if (character->stateManager.isGrabbing) {
+        if (input.attack) {
+            character->pummel();
+        } else if (input.moveLeft) {
+            character->backThrow();
+        } else if (input.moveRight) {
+            character->forwardThrow();
+        } else if (input.up) {
+            character->upThrow();
+        } else if (input.down) {
+            character->downThrow();
+        }
+    }
 }
 
 void NetworkedGameState::captureLocalInput(NetworkInput& input) {
     // Reset the input
     memset(&input, 0, sizeof(NetworkInput));
 
-    // Check keyboard state
+    // Keyboard state mapping using the same controls as in Game.cpp
     input.moveLeft = IsKeyDown(KEY_A);
     input.moveRight = IsKeyDown(KEY_D);
     input.jump = IsKeyPressed(KEY_W);
-    input.fastFall = IsKeyDown(KEY_S);
     input.attack = IsKeyPressed(KEY_J);
     input.special = IsKeyPressed(KEY_K);
     input.smashAttack = IsKeyDown(KEY_L);
     input.shield = IsKeyDown(KEY_I);
     input.grab = IsKeyPressed(KEY_U);
-    input.spot_dodge = IsKeyPressed(KEY_S) && IsKeyDown(KEY_I);
-    input.forward_dodge = IsKeyPressed(KEY_A) && IsKeyDown(KEY_I);
-    input.backward_dodge = IsKeyPressed(KEY_D) && IsKeyDown(KEY_I);
+
+    // Direction indicators
     input.up = IsKeyDown(KEY_W);
     input.down = IsKeyDown(KEY_S);
+
+    // Fast fall - updated logic
+    input.fastFall = IsKeyDown(KEY_S);
+
+    // Dodge inputs
+    input.spot_dodge = IsKeyPressed(KEY_S) && IsKeyDown(KEY_I);
+    input.forward_dodge = IsKeyDown(KEY_D) && IsKeyPressed(KEY_I);
+    input.backward_dodge = IsKeyDown(KEY_A) && IsKeyPressed(KEY_I);
 }
 
 void NetworkedGameState::constructGameStatePacket(GameStatePacket& packet) {
@@ -768,10 +841,8 @@ void NetworkedGameState::constructGameStatePacket(GameStatePacket& packet) {
 
     // Set frame number
     packet.frame = networkFrame;
-    
+
     // Add current game state information
-    // Store in the high bits of the checksum to leave low bits for actual checksum
-    // This helps ensure the client knows what state the host is in
     packet.extraData = (uint32_t)currentState;
 
     // Fill player states

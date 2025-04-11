@@ -138,12 +138,18 @@ void NetworkManager::shutdown() {
     mode = OFFLINE;
 }
 
+// This patch focuses on fixing the connection handling issues
+// in NetworkManager.cpp
+
+// Enhanced startServer method with better error handling and debugging
 bool NetworkManager::startServer(int port) {
-    if (!initialized || mode != OFFLINE) {
+    if (!initialized || socketHandle == INVALID_SOCKET_HANDLE) {
+        std::cerr << "Failed to start server: Network manager not initialized or invalid socket" << std::endl;
         return false;
     }
 
     serverPort = port;
+    std::cout << "Starting server on port " << port << std::endl;
 
     // Bind socket to the specified port
     sockaddr_in serverAddr;
@@ -152,8 +158,25 @@ bool NetworkManager::startServer(int port) {
     serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     serverAddr.sin_port = htons(serverPort);
 
-    if (bind(socketHandle, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR_CODE) {
-        std::cerr << "Failed to bind socket: " << GET_SOCKET_ERROR() << std::endl;
+    // Try to bind multiple times (in case the port is in temporary use)
+    bool bindSuccess = false;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (bind(socketHandle, (sockaddr*)&serverAddr, sizeof(serverAddr)) != SOCKET_ERROR_CODE) {
+            bindSuccess = true;
+            break;
+        }
+
+        std::cerr << "Bind attempt " << attempt+1 << " failed: " << GET_SOCKET_ERROR() << std::endl;
+
+        // If port is in use, try again after a brief pause
+        if (attempt < 2) {
+            std::cout << "Waiting to retry bind..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+    }
+
+    if (!bindSuccess) {
+        std::cerr << "Failed to bind socket after multiple attempts. Try a different port." << std::endl;
         return false;
     }
 
@@ -166,12 +189,210 @@ bool NetworkManager::startServer(int port) {
     running.store(true);
     networkThread = std::thread(&NetworkManager::handleIncomingMessages, this);
 
-    std::cout << "Server started on port " << serverPort << std::endl;
+    std::cout << "Server started successfully on port " << serverPort << std::endl;
+    std::cout << "Server is now listening for connections (local IP: 127.0.0.1)" << std::endl;
     return true;
 }
 
+// Improved connection request handler
+void NetworkManager::handleConnectRequest(const std::string& senderAddr, int senderPort, const uint8_t* data, int size) {
+    if (mode != SERVER) {
+        std::cout << "Ignoring connection request because not in server mode" << std::endl;
+        return;
+    }
+
+    std::cout << "Processing connection request from " << senderAddr << ":" << senderPort << std::endl;
+
+    // Extract player name from connect request
+    std::string playerName = "Player";
+    if (size > 5) {
+        uint32_t nameLength = *reinterpret_cast<const uint32_t*>(&data[1]);
+        std::cout << "Player name length in request: " << nameLength << std::endl;
+
+        if (size >= 5 + nameLength && nameLength < 100) { // Sanity check on name length
+            playerName = std::string(reinterpret_cast<const char*>(&data[5]), nameLength);
+            std::cout << "Player name extracted: '" << playerName << "'" << std::endl;
+        } else {
+            std::cout << "Could not extract player name (invalid length or size)" << std::endl;
+        }
+    } else {
+        std::cout << "Request too short to contain player name" << std::endl;
+    }
+
+    // Check if we already have this peer
+    for (const auto& peer : peers) {
+        if (peer.address == senderAddr && peer.port == senderPort) {
+            std::cout << "Peer already connected, sending accept message again" << std::endl;
+
+            // Resend accept message
+            std::vector<uint8_t> response;
+            response.push_back(MSG_CONNECT_ACCEPT);
+
+            // Fixed: Make a copy of the player ID instead of using the const reference directly
+            uint32_t playerID = peer.playerID;
+            response.insert(response.end(),
+                          reinterpret_cast<uint8_t*>(&playerID),
+                          reinterpret_cast<uint8_t*>(&playerID) + sizeof(playerID));
+
+            // Add server player name length
+            uint32_t nameLength = static_cast<uint32_t>(localPlayerName.length());
+            response.insert(response.end(),
+                          reinterpret_cast<uint8_t*>(&nameLength),
+                          reinterpret_cast<uint8_t*>(&nameLength) + sizeof(nameLength));
+
+            // Add server player name
+            response.insert(response.end(), localPlayerName.begin(), localPlayerName.end());
+
+            // Send multiple times to ensure delivery
+            for (int i = 0; i < 3; i++) {
+                sendMessage(response.data(), response.size(), senderAddr, senderPort);
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+
+            return;
+        }
+    }
+
+    // Generate player ID
+    int newPlayerID = peers.size() + 1;  // Server is 0, clients start at 1
+    uint32_t playerIDNetworkOrder = static_cast<uint32_t>(newPlayerID);
+
+    // Add peer to list
+    PeerInfo newPeer;
+    newPeer.address = senderAddr;
+    newPeer.port = senderPort;
+    newPeer.isConnected = true;
+    newPeer.playerID = newPlayerID;
+    newPeer.playerName = playerName;
+    newPeer.ping = 0;
+    newPeer.lastPingTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+
+    peers.push_back(newPeer);
+
+    // Send accept message back
+    std::vector<uint8_t> response;
+    response.push_back(MSG_CONNECT_ACCEPT);
+
+    // Add assigned player ID
+    response.insert(response.end(),
+                  reinterpret_cast<uint8_t*>(&playerIDNetworkOrder),
+                  reinterpret_cast<uint8_t*>(&playerIDNetworkOrder) + sizeof(playerIDNetworkOrder));
+
+    // Add server player name length
+    uint32_t nameLength = static_cast<uint32_t>(localPlayerName.length());
+    response.insert(response.end(),
+                  reinterpret_cast<uint8_t*>(&nameLength),
+                  reinterpret_cast<uint8_t*>(&nameLength) + sizeof(nameLength));
+
+    // Add server player name
+    response.insert(response.end(), localPlayerName.begin(), localPlayerName.end());
+
+    // Send multiple times to ensure delivery
+    for (int i = 0; i < 3; i++) {
+        bool sent = sendMessage(response.data(), response.size(), senderAddr, senderPort);
+        std::cout << "Sending connect accept message (attempt " << i+1 << "): "
+                  << (sent ? "success" : "failed") << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    std::cout << "Player " << playerName << " connected with ID " << newPlayerID << std::endl;
+}
+
+// Improved connection accept handler
+void NetworkManager::handleConnectAccept(const uint8_t* data, int size) {
+    if (mode != CLIENT) {
+        std::cout << "Ignoring connect accept because not in client mode" << std::endl;
+        return;
+    }
+
+    if (connected) {
+        std::cout << "Already connected, ignoring duplicate accept message" << std::endl;
+        return;
+    }
+
+    // Extract assigned player ID
+    if (size < 5) {
+        std::cerr << "Connect accept message too short" << std::endl;
+        return;
+    }
+
+    uint32_t assignedID = *reinterpret_cast<const uint32_t*>(&data[1]);
+    localPlayerID = assignedID;
+
+    // Extract server name if provided
+    std::string serverName = "Server";
+    if (size >= 9) {
+        uint32_t nameLength = *reinterpret_cast<const uint32_t*>(&data[5]);
+        if (size >= 9 + nameLength) {
+            serverName = std::string(reinterpret_cast<const char*>(&data[9]), nameLength);
+        }
+    }
+
+    // Add server as a peer
+    PeerInfo serverPeer;
+    serverPeer.address = serverAddress;
+    serverPeer.port = serverPort;
+    serverPeer.isConnected = true;
+    serverPeer.playerID = 0; // Server is always ID 0
+    serverPeer.playerName = serverName;
+    serverPeer.ping = 0;
+    serverPeer.lastPingTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+
+    peers.push_back(serverPeer);
+
+    // Mark as connected
+    connected = true;
+
+    std::cout << "Connected to server. Assigned player ID: " << localPlayerID << std::endl;
+}
+
+// Improved sendMessage function with better error handling
+bool NetworkManager::sendMessage(const void* data, int size, const std::string& address, int port) {
+    if (!initialized || socketHandle == INVALID_SOCKET_HANDLE) {
+        std::cerr << "sendMessage: Socket not initialized" << std::endl;
+        return false;
+    }
+
+    // Debug message type
+    if (size > 0) {
+        uint8_t msgType = *reinterpret_cast<const uint8_t*>(data);
+        std::cout << "sendMessage: Sending message type " << (int)msgType
+                 << " to " << address << ":" << port << std::endl;
+    }
+
+    sockaddr_in destAddr;
+    memset(&destAddr, 0, sizeof(destAddr));
+    destAddr.sin_family = AF_INET;
+    destAddr.sin_addr.s_addr = inet_addr(address.c_str());
+    destAddr.sin_port = htons(port);
+
+#ifdef _WIN32
+    int bytesSent = sendto(socketHandle, reinterpret_cast<const char*>(data), size, 0,
+                           reinterpret_cast<sockaddr*>(&destAddr), sizeof(destAddr));
+#else
+    int bytesSent = sendto(socketHandle, data, size, 0,
+                           reinterpret_cast<sockaddr*>(&destAddr), sizeof(destAddr));
+#endif
+
+    if (bytesSent == SOCKET_ERROR_CODE) {
+        std::cerr << "Failed to send message to " << address << ":" << port
+                 << " - Error: " << GET_SOCKET_ERROR() << std::endl;
+        return false;
+    }
+
+    std::cout << "Successfully sent " << bytesSent << " bytes to "
+              << address << ":" << port << std::endl;
+    return true;
+}
+
+// In NetworkManager.cpp - improved connectToServer function
 bool NetworkManager::connectToServer(const std::string& address, int port) {
-    if (!initialized || mode != OFFLINE) {
+    if (!initialized) {
+        std::cerr << "ERROR: Network manager not initialized" << std::endl;
         return false;
     }
 
@@ -181,10 +402,26 @@ bool NetworkManager::connectToServer(const std::string& address, int port) {
     // Set up client state
     mode = CLIENT;
 
-    // Send connect request to server
+    // Add connection info logging
+    std::cout << "Attempting to connect to " << address << ":" << port << std::endl;
+
+    // Send connect request to server with retry logic
     std::vector<uint8_t> connectPacket = createConnectRequestPacket();
-    if (!sendMessage(connectPacket.data(), connectPacket.size(), serverAddress, serverPort)) {
-        std::cerr << "Failed to send connect request" << std::endl;
+    bool sentSuccessfully = false;
+
+    // Try to send connection request multiple times
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (sendMessage(connectPacket.data(), connectPacket.size(), serverAddress, serverPort)) {
+            sentSuccessfully = true;
+            std::cout << "Connect request sent successfully (attempt " << attempt+1 << ")" << std::endl;
+            break;
+        }
+        std::cerr << "Failed to send connect request (attempt " << attempt+1 << ")" << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+
+    if (!sentSuccessfully) {
+        std::cerr << "Failed to send any connect requests" << std::endl;
         mode = OFFLINE;
         return false;
     }
@@ -196,13 +433,19 @@ bool NetworkManager::connectToServer(const std::string& address, int port) {
     // Wait for connect response (with timeout)
     auto startTime = std::chrono::steady_clock::now();
     while (!connected) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        // Log progress
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - startTime).count() % 1000 < 100) {
+            std::cout << "Waiting for server response..." << std::endl;
+        }
 
         auto currentTime = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count();
 
         if (elapsed > 5000) {  // 5 second timeout
-            std::cerr << "Connection to server timed out" << std::endl;
+            std::cerr << "Connection to server timed out after " << elapsed << "ms" << std::endl;
             running.store(false);
             if (networkThread.joinable()) {
                 networkThread.join();
@@ -414,6 +657,8 @@ void NetworkManager::handleIncomingMessages() {
     sockaddr_in senderAddr;
     socklen_t senderAddrLen = sizeof(senderAddr);
 
+    std::cout << "Network thread started, waiting for messages..." << std::endl;
+
     while (running.load()) {
         // Clear the buffer
         std::memset(buffer, 0, BUFFER_SIZE);
@@ -437,15 +682,21 @@ void NetworkManager::handleIncomingMessages() {
         std::string senderIP = inet_ntoa(senderAddr.sin_addr);
         int senderPort = ntohs(senderAddr.sin_port);
 
+        // Debug log any received message
+        std::cout << "Received message from " << senderIP << ":" << senderPort
+                 << " (" << bytesReceived << " bytes), type: " << (int)buffer[0] << std::endl;
+
         // Process message based on type
         uint8_t msgType = buffer[0];
 
         switch (msgType) {
             case MSG_CONNECT_REQUEST:
+                std::cout << "Connection request received from " << senderIP << ":" << senderPort << std::endl;
                 handleConnectRequest(senderIP, senderPort, buffer, bytesReceived);
                 break;
 
             case MSG_CONNECT_ACCEPT:
+                std::cout << "Connection accepted message received" << std::endl;
                 handleConnectAccept(buffer, bytesReceived);
                 break;
 
@@ -459,23 +710,34 @@ void NetworkManager::handleIncomingMessages() {
                 }
                 break;
 
-            case MSG_DISCONNECT:
-                handleDisconnect(buffer, bytesReceived);
-                break;
-
             case MSG_GAME_START:
                 // Handle game start message for clients
                 if (mode == CLIENT) {
                     std::cout << "NetworkManager: Received MSG_GAME_START message from host!" << std::endl;
                     // Set the flag so NetworkedGameState can detect it
-                    bool wasSet = gameStartReceived.exchange(true);
-                    std::cout << "NetworkManager: Set gameStartReceived flag (was " 
-                              << (wasSet ? "already set" : "not set") << ")" << std::endl;
+                    gameStartReceived.store(true);
+
+                    // Immediately send an acknowledgement back to the server
+                    uint8_t startAckMsg[1];
+                    startAckMsg[0] = MSG_GAME_START_ACK;
+                    if (sendMessage(startAckMsg, sizeof(startAckMsg), serverAddress, serverPort)) {
+                        std::cout << "NetworkManager: Sent start acknowledgement to server" << std::endl;
+                    }
+
+                    // Make sure game start is processed even if message is lost later
+                    for (int i = 0; i < 3; i++) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                        gameStartReceived.store(true);
+                    }
                 }
                 break;
 
-            case MSG_GAME_END:
-                // Game end logic will be handled by GameState
+            case MSG_GAME_START_ACK:
+                // Server receives acknowledgement that client got the start message
+                if (mode == SERVER) {
+                    std::cout << "Server received game start acknowledgement from client" << std::endl;
+                    // No specific action needed here, just logging
+                }
                 break;
 
             case MSG_INPUT_UPDATE:
@@ -570,62 +832,22 @@ void NetworkManager::handleIncomingMessages() {
                 break;
         }
     }
+    std::cout << "Network thread exiting" << std::endl;
 }
 
-bool NetworkManager::sendMessage(const void* data, int size, const std::string& address, int port) {
-    if (!initialized || socketHandle == INVALID_SOCKET_HANDLE) {
-        std::cerr << "sendMessage: Socket not initialized" << std::endl;
-        return false;
-    }
-
-    // Debug message type
-    if (size > 0) {
-        uint8_t msgType = *reinterpret_cast<const uint8_t*>(data);
-        if (msgType == MSG_GAME_START) {
-            std::cout << "sendMessage: Sending MSG_GAME_START to " << address << ":" << port << std::endl;
-        }
-    }
-
-    sockaddr_in destAddr;
-    memset(&destAddr, 0, sizeof(destAddr));
-    destAddr.sin_family = AF_INET;
-    destAddr.sin_addr.s_addr = inet_addr(address.c_str());
-    destAddr.sin_port = htons(port);
-
-#ifdef _WIN32
-    int bytesSent = sendto(socketHandle, reinterpret_cast<const char*>(data), size, 0,
-                           reinterpret_cast<sockaddr*>(&destAddr), sizeof(destAddr));
-#else
-    int bytesSent = sendto(socketHandle, data, size, 0,
-                           reinterpret_cast<sockaddr*>(&destAddr), sizeof(destAddr));
-#endif
-
-    if (bytesSent == SOCKET_ERROR_CODE) {
-        std::cerr << "Failed to send message to " << address << ":" << port 
-                 << " - Error: " << GET_SOCKET_ERROR() << std::endl;
-        return false;
-    }
-
-    if (size > 0 && *reinterpret_cast<const uint8_t*>(data) == MSG_GAME_START) {
-        std::cout << "Successfully sent MSG_GAME_START (" << bytesSent << " bytes) to " 
-                  << address << ":" << port << std::endl;
-    }
-
-    return true;
-}
 
 bool NetworkManager::hasGameStartMessage() {
-    // Check and reset the flag atomically
+    // Check the flag atomically
     bool expected = true;
     bool desired = false;
-    bool result = gameStartReceived.compare_exchange_strong(expected, desired);
-    
-    // Add debug output when the flag was set
-    if (result) {
+
+    // Only reset the flag if it was actually set to true
+    if (gameStartReceived.compare_exchange_strong(expected, desired)) {
         std::cout << "NetworkManager: Game start message detected and flag reset" << std::endl;
+        return true;
     }
-    
-    return result;
+
+    return false;
 }
 
 bool NetworkManager::sendToAll(const void* data, int size) {
@@ -643,6 +865,25 @@ bool NetworkManager::sendToAll(const void* data, int size) {
         // Special handling for game start message
         if (msgType == MSG_GAME_START) {
             std::cout << "NetworkManager: Broadcasting MSG_GAME_START to all clients" << std::endl;
+
+            // For game start, send multiple times with small delays to ensure delivery
+            bool success = true;
+            for (int retry = 0; retry < 3; retry++) {
+                int sentCount = 0;
+                for (const auto& peer : peers) {
+                    if (sendMessage(data, size, peer.address, peer.port)) {
+                        sentCount++;
+                    } else {
+                        success = false;
+                    }
+                }
+                std::cout << "NetworkManager: Game start message sent to " << sentCount << "/"
+                          << peers.size() << " peers (attempt " << retry+1 << ")" << std::endl;
+
+                // Small delay between retries
+                if (retry < 2) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            return success;
         }
     }
 
@@ -654,117 +895,13 @@ bool NetworkManager::sendToAll(const void* data, int size) {
             sentCount++;
         } else {
             success = false;
-            std::cout << "NetworkManager: Failed to send to peer " << peer.playerID 
-                      << " at " << peer.address << ":" << peer.port << std::endl;
+            std::cout << "NetworkManager: Failed to send to peer " << peer.playerID
+                    << " at " << peer.address << ":" << peer.port << std::endl;
         }
     }
     
     std::cout << "NetworkManager: Message sent to " << sentCount << "/" << peers.size() << " peers" << std::endl;
     return success;
-}
-
-void NetworkManager::handleConnectRequest(const std::string& senderAddr, int senderPort, const uint8_t* data, int size) {
-    if (mode != SERVER) {
-        return;
-    }
-
-    // Extract player name from connect request
-    std::string playerName = "Player";
-    if (size > 5) {
-        uint32_t nameLength = *reinterpret_cast<const uint32_t*>(&data[1]);
-        if (size >= 5 + nameLength) {
-            playerName = std::string(reinterpret_cast<const char*>(&data[5]), nameLength);
-        }
-    }
-
-    // Check if we already have this peer
-    for (const auto& peer : peers) {
-        if (peer.address == senderAddr && peer.port == senderPort) {
-            // Already connected, ignore
-            return;
-        }
-    }
-
-    // Generate player ID (in a real implementation, use a more robust method)
-    int newPlayerID = peers.size() + 1;  // Server is 0, clients start at 1
-
-    // Add peer to list
-    PeerInfo newPeer;
-    newPeer.address = senderAddr;
-    newPeer.port = senderPort;
-    newPeer.isConnected = true;
-    newPeer.playerID = newPlayerID;
-    newPeer.playerName = playerName;
-    newPeer.ping = 0;
-    newPeer.lastPingTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()
-    ).count();
-
-    peers.push_back(newPeer);
-
-    // Send accept message back
-    std::vector<uint8_t> response;
-    response.push_back(MSG_CONNECT_ACCEPT);
-
-    // Add assigned player ID
-    response.insert(response.end(),
-                  reinterpret_cast<uint8_t*>(&newPlayerID),
-                  reinterpret_cast<uint8_t*>(&newPlayerID) + sizeof(newPlayerID));
-
-    // Add server player name length
-    uint32_t nameLength = static_cast<uint32_t>(localPlayerName.length());
-    response.insert(response.end(),
-                  reinterpret_cast<uint8_t*>(&nameLength),
-                  reinterpret_cast<uint8_t*>(&nameLength) + sizeof(nameLength));
-
-    // Add server player name
-    response.insert(response.end(), localPlayerName.begin(), localPlayerName.end());
-
-    sendMessage(response.data(), response.size(), senderAddr, senderPort);
-
-    std::cout << "Player " << playerName << " connected with ID " << newPlayerID << std::endl;
-}
-
-void NetworkManager::handleConnectAccept(const uint8_t* data, int size) {
-    if (mode != CLIENT || connected) {
-        return;
-    }
-
-    // Extract assigned player ID
-    if (size < 5) {
-        return;
-    }
-
-    uint32_t assignedID = *reinterpret_cast<const uint32_t*>(&data[1]);
-    localPlayerID = assignedID;
-
-    // Extract server name if provided
-    std::string serverName = "Server";
-    if (size >= 9) {
-        uint32_t nameLength = *reinterpret_cast<const uint32_t*>(&data[5]);
-        if (size >= 9 + nameLength) {
-            serverName = std::string(reinterpret_cast<const char*>(&data[9]), nameLength);
-        }
-    }
-
-    // Add server as a peer
-    PeerInfo serverPeer;
-    serverPeer.address = serverAddress;
-    serverPeer.port = serverPort;
-    serverPeer.isConnected = true;
-    serverPeer.playerID = 0; // Server is always ID 0
-    serverPeer.playerName = serverName;
-    serverPeer.ping = 0;
-    serverPeer.lastPingTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()
-    ).count();
-
-    peers.push_back(serverPeer);
-
-    // Mark as connected
-    connected = true;
-
-    std::cout << "Connected to server. Assigned player ID: " << localPlayerID << std::endl;
 }
 
 void NetworkManager::handleDisconnect(const uint8_t* data, int size) {
@@ -804,11 +941,6 @@ void NetworkManager::handleInputUpdate(const uint8_t* data, int size) {
     }
 
     uint32_t playerID = *reinterpret_cast<const uint32_t*>(&data[1]);
-
-    // Don't process own input
-    if (playerID == localPlayerID) {
-        return;
-    }
 
     // Extract input data
     NetworkInput input;

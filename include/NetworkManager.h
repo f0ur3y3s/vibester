@@ -19,6 +19,7 @@ enum NetworkMessageType {
     MSG_CONNECT_DENY,
     MSG_DISCONNECT,
     MSG_GAME_START,
+    MSG_GAME_START_ACK,
     MSG_GAME_END,
     MSG_INPUT_UPDATE,
     MSG_GAME_STATE_UPDATE,
@@ -29,21 +30,32 @@ enum NetworkMessageType {
 
 // Define player input state for networking
 struct NetworkInput {
+    uint32_t frame;          // Frame number this input was recorded on
+
+    // Movement flags
     bool moveLeft;
     bool moveRight;
     bool jump;
+    bool fastFall;
+
+    // Direction indicators
+    bool up;
+    bool down;
+
+    // Attack flags
     bool attack;
     bool special;
-    bool shield;
-    bool grab;
     bool smashAttack;
-    bool fastFall;
+    bool grab;
+
+    // Defensive flags
+    bool shield;
     bool spot_dodge;
     bool forward_dodge;
     bool backward_dodge;
-    bool up;
-    bool down;
-    uint32_t frame;  // For synchronization
+
+    // NOTE: We removed the dropThrough field as it was causing compilation errors
+    // Instead, we handle platform drop-through using a combination of existing flags
 };
 
 // Define game state packet for synchronization

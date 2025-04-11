@@ -644,16 +644,21 @@ void NetworkUI::onStartMatchClicked() {
 
     // Log for debugging
     NetworkManager& netManager = NetworkManager::getInstance();
-    std::cout << "Host starting match with " << netManager.peers.size() + 1 << " players" << std::endl;
-    
-    // Make sure the game state is correctly set
-    // We'll rely on Game.cpp to hide the UI when the state changes
-    
+    std::cout << "Host: Starting match with " << netManager.peers.size() + 1 << " players" << std::endl;
+
+    // Make sure we send multiple start messages to ensure clients receive it
+    uint8_t startGameMsg[1];
+    startGameMsg[0] = MSG_GAME_START;
+
+    // Send multiple times to ensure delivery
+    for (int i = 0; i < 3; i++) {
+        netManager.sendToAll(startGameMsg, sizeof(startGameMsg));
+    }
+
     // Let the NetworkedGameState handle the game start
-    // It will propagate the message to clients 
     gameState->changeState(GameState::GAME_START);
-    
-    // Return to Game.cpp's main loop - this will make the network UI invisible immediately
+
+    // Return to Game.cpp's main loop
     currentState = HIDDEN;
 }
 
