@@ -2,31 +2,18 @@
 #define CHARACTER_H
 
 #include "raylib.h"
-#include "Platform.h"
-#include "AttackBox.h"
-#include "Particle.h"
-#include "PhysicsState.h"
-#include "StateManager.h"
-#include "CharacterConfig.h"
+#include "../Platform.h"
+#include "../attacks/AttackBox.h"
+#include "CharacterPhysics.h"
+#include "CharacterStateManager.h"
+#include "CharacterState.h"
+#include "HitEffect.h"
+#include "../Particle.h"
 #include <string>
 #include <vector>
 
 // Forward declaration
 class Character;
-
-// Hit effect struct
-struct HitEffect
-{
-    Vector2 position;
-    Color color;
-    int duration;
-    int currentFrame;
-    float size;
-
-    HitEffect(Vector2 pos, Color col);
-    bool update();
-    void draw();
-};
 
 // Character class - enhanced for Smash Bros style
 class Character
@@ -40,8 +27,8 @@ public:
     std::string name;
 
     // Core systems
-    PhysicsState physics; // Handles movement and physics
-    StateManager stateManager; // Handles state and attack management
+    CharacterPhysics physics;
+    CharacterStateManager stateManager;
 
     // Smash-style properties
     float damagePercent; // Damage as percentage (0-999%)
@@ -76,6 +63,7 @@ public:
     int getStocks() const;
     std::string getName() const;
 
+    // Explosion management
     void checkForExplosion();
     void startExplosionAnimation();
     void updateExplosionAnimation();
@@ -83,7 +71,7 @@ public:
 
     // Basic methods
     Rectangle getRect();
-    Rectangle getHurtbox(); // Possibly smaller than character rect
+    Rectangle getHurtbox();
     void update(std::vector<Platform>& platforms);
     void updateAttackPositions();
     void draw();
@@ -95,7 +83,7 @@ public:
     void respawn(Vector2 spawnPoint);
 
     // State management
-    void changeState(CharacterState newState);
+    void changeState(CharacterState::State newState);
     void resetAttackState();
 
     // Movement methods
@@ -121,7 +109,7 @@ public:
     void downTilt();
     void dashAttack();
 
-    // Simple attack wrappers for main.cpp
+    // Simple attack wrappers
     void neutralAttack() { jab(); }
     void sideAttack() { forwardTilt(); }
     void upAttack() { upTilt(); }
